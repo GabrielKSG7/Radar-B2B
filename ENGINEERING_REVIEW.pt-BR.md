@@ -1,3 +1,5 @@
+[English](ENGINEERING_REVIEW.md) · **Português**
+
 # Revisão do Radar B2B contra o Plano Diretor V2
 
 Data: 14/09/2026 · Referência: `Plano_Diretor_Radar_B2B_V2.pdf` e
@@ -54,6 +56,9 @@ workflows do GitHub Actions dependam disso.
 
 ### 3.1 CRÍTICO — o orquestrador perdeu a interface de linha de comando
 
+> **RESOLVIDO na 2.2.0.** Registro mantido porque o achado explica
+> por que o CI passou meses sem exercitar as fixtures.
+
 O `run_pipeline.py` hoje fixa competências, fatias e UF em constantes e **não
 lê `sys.argv`**. Mas:
 
@@ -107,6 +112,8 @@ fatia a fatia (2.1.7) tornou isso viável em disco; falta executar.
 
 ### 3.3 ALTO — chaves do ICP silenciosamente ignoradas
 
+> **RESOLVIDO na 2.2.0.**
+
 O `contabilidade_sul_mg.yaml` declara:
 
 ```yaml
@@ -147,6 +154,8 @@ a partir de um conjunto fixo e conhecido de colunas, isso é perfeitamente
 viável — e é o que permite auditar uma explicação meses depois.
 
 ### 3.6 OTIMIZAÇÃO — `empresas` ingerida para o país inteiro
+
+> **RESOLVIDO na 2.2.0.**
 
 `Estabelecimentos` é filtrada por UF; `empresas` não, porque a tabela não tem
 coluna de UF. Com as 10 fatias, o Bronze guardará **~180 milhões de linhas por
@@ -193,11 +202,11 @@ Registro explícito, porque em revisão só se fala do que está errado:
 
 | # | Item | Por quê agora |
 |---|---|---|
-| 1 | Restaurar CLI do `run_pipeline.py` (3.1) | Destrava CI e automação; pequeno e de baixo risco |
+| ~~1~~ | ~~Restaurar CLI do `run_pipeline.py`~~ (3.1) | ✅ feito na 2.2.0 |
 | 2 | Carga completa das 10 fatias (3.2) | É o DoD da Fase 4 e o portão para tudo que vem depois |
-| 3 | Ler `geografia.uf` e `eventos` do ICP (3.3) | Configuração honesta antes de entregar a terceiros |
+| ~~3~~ | ~~Ler `geografia.uf` e `eventos` do ICP~~ (3.3) | ✅ feito na 2.2.0 |
 | 4 | Eventos/oportunidades e custo de LLM no `run_log` (3.4) | §16; e sem isso não dá para medir a validação |
-| 5 | Filtrar `empresas` por UF (3.6) | Otimização; só compensa antes da carga completa |
+| ~~5~~ | ~~Filtrar `empresas` por UF~~ (3.6) | ✅ feito na 2.2.0 |
 | 6 | Campos de grounding (3.5) | §11; melhora auditabilidade, não bloqueia validação |
 | 7 | Remover workflow órfão (3.7) | Higiene |
 
@@ -212,7 +221,7 @@ desperdício.
 Cada etapa tem **critério de aceite verificável**. Se o critério não bater, o
 problema é ali — não adiante para a etapa seguinte carregando dúvida.
 
-### Etapa 1 · Destravar a interface (≈30 min, antes de qualquer carga)
+### ~~Etapa 1 · Destravar a interface~~ ✅ concluída na 2.2.0
 
 Três correções pequenas que precisam vir antes da carga completa, porque duas
 delas mudam o que a carga grava:

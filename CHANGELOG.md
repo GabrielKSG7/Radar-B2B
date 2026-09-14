@@ -1,888 +1,883 @@
+**English** · [Português](CHANGELOG.pt-BR.md)
+
 # Changelog — Radar B2B
 
-Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+---
+
+## [2.2.1] — 2026-09-14
+
+Documentation made bilingual, with English as the portfolio-facing version.
+
+### Changed
+
+- `README.md`, `CHANGELOG.md` and `ENGINEERING_REVIEW.md` are now the English
+  versions; `*.pt-BR.md` hold the Portuguese. Each carries a language switcher
+  in the first line.
+- The English README gained a **domain glossary** (CNPJ, CNAE, *competência*,
+  Estabelecimentos/Empresas) and a short explanation of the two source
+  properties that drive the architecture: monthly snapshots instead of a
+  change log, and ~85 GB of messy, shard-split data. Without that context the
+  design decisions are unreadable to anyone outside Brazil.
+- Both READMEs were brought to parity and updated with what was learned since:
+  shard instability across vintages, the `diagnostico_eventos.py` sanity gate,
+  the two time/vintage anchoring rules, and the note on regression tests that
+  cannot fail.
+- `REVISAO_PD_V2.md` became `ENGINEERING_REVIEW.md` (+ `.pt-BR`). The old file
+  is now a pointer and can be removed with `git rm`. References in
+  `run_pipeline.py`, `scripts/carregar_icp.py` and `gld_icp_matches.sql` were
+  updated.
+- In the review, items 3.1, 3.3 and 3.6 are marked **RESOLVED in 2.2.0** —
+  kept on the record, since the findings explain how the defects survived.
 
 ---
 
 ## [2.2.0] — 2026-09-14
 
-Etapa 1 da revisão contra o Plano Diretor V2 (ver `REVISAO_PD_V2.md`). Três
-correções que precisavam vir **antes** da carga completa das 10 fatias, porque
-duas delas mudam o que a carga grava.
+Stage 1 of the review against the master plan (see `ENGINEERING_REVIEW.md`).
+Three fixes that had to land **before** the full ten-shard load, because two of
+them change what the load writes.
 
-### Corrigido — CRÍTICO
+### Fixed — CRITICAL
 
-- **O orquestrador não lia `sys.argv`.** `run_pipeline.py` fixava tudo em
-  constantes, enquanto o README documentava uma CLI e os dois workflows do
-  GitHub Actions a usavam. Python não reclama de argumento que ninguém
-  consome, então as opções eram **silenciosamente descartadas**.
+- **The orchestrator never read `sys.argv`.** `run_pipeline.py` hardcoded
+  everything in constants while the README documented a CLI and both GitHub
+  Actions workflows used it. Python does not complain about arguments nobody
+  consumes, so the options were **silently discarded**.
 
-  Medido executando o `main()` com a linha exata do `ci.yml`
-  (`--competencia 2026-08 --anterior 2026-07 --somente-local --sem-ia`): o
-  pipeline ignorava as quatro e executava 2024-07/2024-08 com as 10 fatias
-  reais. Ou seja, **todo push para `main` disparava uma tentativa de download
-  de dezenas de GB** da Receita, e as fixtures — única proteção real contra
-  regressão de parsing — nunca eram exercitadas. A automação mensal tinha o
-  mesmo defeito: descartava o `--competencia` do `workflow_dispatch` e
-  reprocessaria 2024-08 indefinidamente.
-  → `argparse` com `--competencia`, `--anterior`, `--uf`, `--fatias`,
-  `--icp`, `--somente-local` e `--sem-ia`, tendo as constantes atuais como
-  default: rodar sem argumentos mantém exatamente o comportamento anterior.
-  `--icp` passou a alimentar a var `icp_ativo` do dbt, que antes era sempre a
-  do `dbt_project.yml`.
+  Measured by running `main()` with the exact line from `ci.yml`
+  (`--competencia 2026-08 --anterior 2026-07 --somente-local --sem-ia`): the
+  pipeline ignored all four and ran 2024-07/2024-08 with all ten real shards.
+  In practice, **every push to `main` triggered an attempt to download tens of
+  gigabytes** from the tax authority, and the fixtures — the only real guard
+  against parsing regressions — were never exercised. The monthly automation
+  had the same defect: it discarded the `--competencia` input and would
+  reprocess 2024-08 forever.
+  → `argparse` with `--competencia`, `--anterior`, `--uf`, `--fatias`,
+  `--icp`, `--somente-local` and `--sem-ia`, defaulting to the current
+  constants: running with no arguments preserves the previous behaviour
+  exactly. `--icp` now feeds dbt's `icp_ativo` var, which was previously
+  always the one from `dbt_project.yml`.
 
-### Corrigido — ALTO
+### Fixed — HIGH
 
-- **Chaves do ICP silenciosamente ignoradas.** `geografia.uf` e `eventos`
-  estavam no YAML e o `carregar_icp.py` nunca os lia — o PD §9 lista os dois
-  como atributos do ICP. Restringir por UF na configuração não tinha efeito
-  algum.
-  → Novas tabelas `config.icp_uf` e `config.icp_evento`, declaradas em
-  `sources.yml` e aplicadas em `gld_icp_matches`. Lista vazia significa "sem
-  restrição", nunca "nada passa".
+- **Silently ignored ICP keys.** `geografia.uf` and `eventos` existed in the
+  YAML and `carregar_icp.py` never read them — the master plan §9 lists both
+  as ICP attributes. Restricting by state in configuration had no effect at
+  all.
+  → New `config.icp_uf` and `config.icp_evento` tables, declared in
+  `sources.yml` and applied in `gld_icp_matches`. An empty list means "no
+  restriction", never "nothing passes".
 
-### Alterado — otimização
+### Changed — optimization
 
-- **`empresas` restrita ao recorte de UF.** A tabela não tem coluna de UF, e
-  sem filtro o Bronze guardaria **~180 milhões de linhas por competência**
-  para servir a ~2 milhões de estabelecimentos de MG. Como ela só é usada em
-  join por `cnpj_basico` com os estabelecimentos já filtrados, passa a ser
-  restrita ao conjunto que sobreviveu ao recorte.
-  → A ingestão virou **duas passadas sequenciais** (todos os estabelecimentos,
-  depois todas as empresas) em vez de intercalar as tabelas fatia a fatia: não
-  há garantia de que `Empresas{i}` e `Estabelecimentos{i}` cubram os mesmos
-  CNPJs, então o filtro usa todas as fatias de estabelecimentos já gravadas.
-  → `_carregar_parquet` ganhou `filtro_extra`, combinado com o filtro de UF.
+- **`empresas` restricted to the state filter.** The table has no state
+  column, so without a filter Bronze would hold **~180 million rows per
+  vintage** to serve ~2 million establishments in Minas Gerais. Since it is
+  only used in a join by `cnpj_basico` against already-filtered
+  establishments, it is now restricted to the surviving set.
+  → Ingestion became **two sequential passes** (all establishments, then all
+  companies) instead of interleaving tables shard by shard: there is no
+  guarantee that `Empresas{i}` and `Estabelecimentos{i}` cover the same CNPJs,
+  so the filter uses every establishment shard already written.
+  → `_carregar_parquet` gained `filtro_extra`, combined with the state filter.
 
-### Adicionado
+### Added
 
-- 5 testes, todos verificados contra a versão anterior: a linha exata do
-  `ci.yml` sendo honrada, `--icp` chegando ao dbt, defaults preservando o
-  comportamento sem argumentos, `uf`/`eventos` carregados do YAML e
-  `filtro_extra` somando ao filtro de UF.
+- 5 tests, each verified to fail against the previous version: the exact
+  `ci.yml` line being honoured, `--icp` reaching dbt, defaults preserving
+  no-argument behaviour, `uf`/`eventos` loaded from YAML, and `filtro_extra`
+  composing with the state filter.
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 45 passando (antes: 40) |
-| Os 3 testes de CLI/ICP contra a versão anterior | falham, como esperado |
-| Lint (ruff) | limpo |
-| Ingestão de 3 fatias com `--uf MG` | empresas 350 → 287 (só CNPJs de MG) |
-
-### Pendente da revisão
-
-Itens 4, 6 e 7 do §5 da `REVISAO_PD_V2.md`: eventos/oportunidades e custo de
-LLM no `run_log`, campos de grounding e remoção do workflow órfão
-`python-package-conda.yml`. Nenhum bloqueia a carga completa.
+| pytest | 45 passing (previously 40) |
+| The 3 CLI/ICP tests against the previous version | fail, as expected |
+| Lint (ruff) | clean |
+| 3-shard ingestion with `--uf MG` | companies 350 → 287 (Minas Gerais CNPJs only) |
 
 ---
 
 ## [2.1.7] — 2026-09-14
 
-Com as correções da 2.1.6 o pipeline passou a produzir eventos: 580.729 em
-2024-08. O `diagnostico_eventos.py` reprovou: 95,5% deles eram empresas
-abertas anos antes, e a distribuição por ano de abertura reproduzia o perfil
-etário da base ativa — assinatura de amostra, não de evento.
+With the 2.1.6 fixes the pipeline finally produced events: 580,729 for
+2024-08. `diagnostico_eventos.py` rejected them: 95.5% were companies opened
+years earlier, and the distribution by opening year reproduced the age profile
+of the active company base — the signature of a sample, not of an event.
 
-### Descoberto
+### Discovered
 
-- **A fatia não é estável entre competências.** Medido com a MESMA fatia 0 nas
-  duas competências: **1.400.049 CNPJs (69,2%) existem só em 2024-07** e
-  1.451.412 só em 2024-08 — de ~2 milhões em cada mês, apenas ~30% são comuns.
-  Cadastro de empresa não evapora assim.
+- **Shards are not stable across vintages.** Measured using the *same* shard 0
+  in both vintages: **1,400,049 CNPJs (69.2%) exist only in 2024-07** and
+  1,451,412 only in 2024-08 — of roughly 2 million rows each month, only ~30%
+  are common. Company registrations do not evaporate like that.
 
-  O mesmo CNPJ muda de arquivo a cada publicação da Receita. Isso invalida a
-  premissa registrada em `config.py` ("particionadas por hash do CNPJ
-  básico"): duas competências ingeridas com "a fatia 0" são recortes
-  diferentes do mesmo universo, e o set difference entre elas mede sorteio.
+  The same CNPJ moves between files on every publication. This invalidates the
+  premise recorded in `config.py` ("partitioned by hash of the base CNPJ"):
+  two vintages ingested with "shard 0" are different slices of the same
+  universe, and the set difference between them measures sampling.
 
-  Consequência: **não existe atalho para o CDC**. Medir abertura de empresa
-  exige as 10 fatias nas duas competências. O
-  `assert_evento_nao_existe_na_competencia_anterior` não protege contra isso —
-  sob o critério dele as empresas faltantes são legitimamente ausentes.
+  Consequence: **there is no shortcut for change detection.** Measuring
+  company formation requires all ten shards in both vintages.
+  `assert_evento_nao_existe_na_competencia_anterior` does not protect against
+  this — under its criterion the missing companies are legitimately absent.
 
-### Alterado — ingestão fatia a fatia
+### Changed — shard-by-shard ingestion
 
-- Carregar as 10 fatias como antes (baixar tudo, extrair tudo, depois carregar)
-  exigiria manter **~45 GB de CSV extraído por competência** no disco, mais de
-  100 GB somando as duas.
-  → `ingerir` passa a processar **uma fatia por vez**: baixa, extrai, carrega,
-  apaga o CSV e só então vai para a próxima. Pico de disco de poucos GB. Os
-  ZIPs ficam, porque são o cache que evita rebaixar tudo.
-  → `_carregar_parquet` ganhou `fatia` (grava `dados_<n>.parquet` dentro da
-  partição) e `limpar` (só a primeira fatia zera a pasta). O Hive partitioning
-  lê todos os parquet da partição, então o resultado é idêntico ao da carga
-  única.
-  → O limiar de rejeição é avaliado por fatia, enquanto o CSV ainda existe —
-  antes o denominador era calculado depois, quando o arquivo já teria sido
-  apagado.
+- Loading ten shards the old way (download everything, extract everything,
+  then load) would require keeping **~45 GB of extracted CSV per vintage** on
+  disk, over 100 GB for both.
+  → `ingerir` now processes **one shard at a time**: download, extract, load,
+  delete the CSV, then move on. Peak disk usage drops to a few GB. The ZIPs
+  stay, since they are the cache that avoids re-downloading everything.
+  → `_carregar_parquet` gained `fatia` (writes `dados_<n>.parquet` inside the
+  partition) and `limpar` (only the first shard clears the folder). Hive
+  partitioning reads every Parquet in the partition, so the result is
+  identical to a single load.
+  → The rejection threshold is evaluated per shard, while the CSV still
+  exists — previously the denominator was computed afterwards, when the file
+  would already have been deleted.
 
-- **Aviso de carga parcial.** Ingerir com menos que todas as fatias agora
-  imprime um alerta explicando que o resultado serve para testar o
-  encanamento e não para gerar digest.
+- **Partial-load warning.** Ingesting with fewer than all shards now prints an
+  explicit warning that the result is good for exercising the plumbing and not
+  for producing a digest.
 
-- `run_pipeline.py`: `FATIAS` passa a ser `0..9`, com a medição que justifica
-  a decisão registrada no próprio comentário.
+- `run_pipeline.py`: `FATIAS` is now `0..9`, with the measurement justifying
+  the decision recorded in the comment itself.
 
-### Adicionado
+### Added
 
-- 2 testes: um parquet por fatia somando o total na partição, e `limpar=False`
-  preservando o que já foi carregado (com o caso inverso, para fixar o
-  contrato).
+- 2 tests: one Parquet per shard summing to the partition total, and
+  `limpar=False` preserving what was already loaded (with the inverse case, to
+  pin the contract).
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 40 passando (antes: 38) |
-| Lint (ruff) | limpo |
-| Ingestão de 3 fatias (fixtures) | 3 parquet na partição, soma correta (861 = 3×287) |
-| CSVs após a carga | pasta vazia — disco liberado |
-| ZIPs após a carga | preservados (cache do `[SKIP]`) |
-
-> A carga real das 10 fatias nas duas competências ainda não foi executada —
-> são horas de download e dependem da infraestrutura da RFB. É o que fecha o
-> item "primeira carga com dados reais" do roadmap, e o veredito é do
-> `diagnostico_eventos.py`.
+| pytest | 40 passing (previously 38) |
+| Lint (ruff) | clean |
+| 3-shard ingestion (fixtures) | 3 Parquet in the partition, correct sum (861 = 3×287) |
+| CSVs after load | folder empty — disk released |
+| ZIPs after load | preserved (the `[SKIP]` cache) |
 
 ---
 
 ## [2.1.6] — 2026-09-14
 
-O pipeline rodou de ponta a ponta, todas as etapas "✅ SUCESSO", digest
-gerado — e **zero eventos detectados**. O produto inteiro entregou uma folha
-em branco sem um único erro no caminho. Dois defeitos independentes, ambos da
-mesma família: o pipeline media o tempo pelo relógio de parede em vez de pela
-competência processada, e o orquestrador não dizia ao dbt qual competência
-processar.
+The pipeline ran end to end, every stage marked ✅, digest generated — and
+**zero events detected**. The entire product delivered a blank page without a
+single error anywhere. Two independent defects, both from the same family: the
+pipeline measured time by the wall clock instead of by the vintage being
+processed, and the orchestrator never told dbt which vintage to process.
 
-> Achado pelo `scripts/diagnostico_eventos.py`. Sem ele, a conclusão natural
-> seria "não houve aberturas neste mês".
+> Found by `scripts/diagnostico_eventos.py`. Without it, the natural
+> conclusion would have been "no companies opened this month".
 
-### Corrigido — CRÍTICO
+### Fixed — CRITICAL
 
-- **O dbt transformava uma competência que não estava no banco.** O
-  orquestrador rodava `dbt run --profiles-dir .` **sem `--vars`**, então valia
-  o default do `dbt_project.yml` (`2026-08`/`2026-07`) enquanto a ingestão
-  carregava `2024-08`/`2024-07`. Todo `where competencia = '2026-08'` casou
-  com zero linhas. Os 10 modelos reportaram OK porque **construir uma tabela
-  vazia é operação perfeitamente válida** — o dbt não tem como saber que o
-  vazio não era o esperado.
+- **dbt transformed a vintage that was not in the database.** The orchestrator
+  ran `dbt run --profiles-dir .` **without `--vars`**, so the default from
+  `dbt_project.yml` applied (`2026-08`/`2026-07`) while ingestion loaded
+  `2024-08`/`2024-07`. Every `where competencia = '2026-08'` matched zero
+  rows. All ten models reported OK because **building an empty table is a
+  perfectly valid operation** — dbt has no way to know the emptiness was
+  unexpected.
 
-  O comentário no próprio `dbt_project.yml` já avisava: *"Sobrescreva com
-  --vars na execução."*
-  → As competências viraram constantes no topo de `run_pipeline.py` e
-  alimentam a ingestão **e** o dbt. Uma fonte, dois consumidores: fica
-  impossível ingerir um mês e transformar outro.
+  The comment in `dbt_project.yml` already warned: *"override with --vars at
+  run time."*
+  → Vintages became constants at the top of `run_pipeline.py`, feeding both
+  ingestion **and** dbt. One source, two consumers: it is now structurally
+  impossible to ingest one month and transform another.
 
-- **Recência medida contra a data de execução.** `gld_icp_matches` calculava
-  `date_diff('day', event_date, current_date)` e filtrava por
-  `dias_desde_evento <= recencia_dias` (45, no ICP). Processando 2024-08 em
-  setembro de 2026, uma empresa aberta em 05/08/2024 dava **770 dias** e era
-  descartada. Mesmo com as `--vars` corrigidas, o Gold continuaria vazio.
-  → Novo macro `data_referencia()`: âncora no último dia da competência
-  processada. A mesma empresa passa a dar **26 dias** e casa corretamente.
+- **Recency measured against the execution date.** `gld_icp_matches` computed
+  `date_diff('day', event_date, current_date)` and filtered on
+  `dias_desde_evento <= recencia_dias` (45, per the ICP). Processing 2024-08 in
+  September 2026, a company opened on 2024-08-05 scored **770 days** and was
+  discarded. Even with `--vars` fixed, Gold would still have come out empty.
+  → New `data_referencia()` macro: anchored to the last day of the vintage
+  being processed. The same company now scores **26 days** and matches
+  correctly.
 
-  Isso também torna o cálculo **idempotente** — reprocessar a mesma
-  competência daqui a um ano dá o mesmo score. É exatamente o defeito que o
-  cabeçalho de `evt_new_company` já criticava na V3 ("o resultado mudava
-  conforme o dia da execução") e que havia sobrevivido na camada Gold.
+  This also makes the calculation **idempotent** — reprocessing the same
+  vintage a year from now yields the same score. It is precisely the defect
+  the `evt_new_company` header already criticized in V3 ("the result changed
+  depending on the day it ran") and which had survived in the Gold layer.
 
-- **`confidence` sempre 'media'.** Mesmo `current_date` cravado em
-  `evt_new_company`: com dado histórico, nenhum evento jamais alcançava a
-  janela de 120 dias. O campo dizia a mesma coisa para tudo.
-  → Passa a usar `data_referencia()`.
+- **`confidence` always 'media'.** The same hardcoded `current_date` in
+  `evt_new_company`: with historical data no event ever reached the 120-day
+  window, so the field said the same thing about everything.
+  → Now uses `data_referencia()`.
 
-### Corrigido — ALTO
+### Fixed — HIGH
 
-- **Fatias assimétricas entre competências.** `2024-07` era ingerida com
-  `--fatias 0` e `2024-08` com `--fatias 0,1`. As fatias são partições por
-  hash do CNPJ básico: as empresas da fatia 1 existem nos dois meses **na
-  realidade**, mas só estavam no Bronze de um — e o set difference as
-  classificaria como novas. O
-  `assert_evento_nao_existe_na_competencia_anterior` **não pega isso**: sob o
-  critério dele, essas empresas são legitimamente ausentes do mês anterior.
-  → Constante `FATIAS`, única para as duas competências.
+- **Asymmetric shards between vintages.** `2024-07` was ingested with
+  `--fatias 0` and `2024-08` with `--fatias 0,1`. Companies in shard 1 exist
+  in both months **in reality**, but were only in one month's Bronze — so the
+  set difference would classify them as new.
+  `assert_evento_nao_existe_na_competencia_anterior` **does not catch this**.
+  → `FATIAS` constant, shared by both vintages.
 
-- **`dbt run` trocado por `dbt build`.** O `run` não executa os 24 testes de
-  dados. O pipeline vinha entregando digest sem rodar
-  `assert_evento_nao_existe_na_competencia_anterior`, que o README descreve
-  como o teste sem o qual "o produto perde credibilidade". Se um teste falhar
-  agora, o pipeline para — comportamento desejado.
+- **`dbt run` replaced by `dbt build`.** `run` does not execute the 24 data
+  tests. The pipeline had been shipping a digest without ever running
+  `assert_evento_nao_existe_na_competencia_anterior`, which the README calls
+  the test without which "the product loses credibility". If a test fails now,
+  the pipeline stops — the desired behaviour.
 
-### Adicionado
+### Added
 
-- `dbt_radar/macros/data_referencia.sql` — âncora temporal única, documentada.
-- 3 testes de orquestração que executam o `main()` real com `run_step`
-  interceptado, validando a orquestração em si e não uma cópia dela:
-  competências consistentes entre ingestão e dbt, fatias idênticas, e uso de
-  `dbt build`. Os três falham contra a versão anterior.
+- `dbt_radar/macros/data_referencia.sql` — single documented time anchor.
+- 3 orchestration tests that execute the real `main()` with `run_step`
+  intercepted, validating the orchestration itself rather than a copy of it:
+  consistent vintages between ingestion and dbt, identical shards, and use of
+  `dbt build`. All three fail against the previous version.
 
-### Alterado
+### Changed
 
-- `scripts/diagnostico_eventos.py` passa a tratar **zero eventos como falha**
-  (código de saída 1), não como "nada a analisar", e lista as causas prováveis
-  em ordem. Também deixou de imprimir `None -> None` quando não há eventos dos
-  quais extrair a competência.
-- `test_pipeline_carrega_icp_antes_do_dbt` não fixa mais o subcomando `dbt
-  run` — ele quebrou sozinho na troca para `dbt build`.
+- `scripts/diagnostico_eventos.py` now treats **zero events as a failure**
+  (exit code 1) rather than "nothing to analyse", and lists the probable
+  causes in order. It also stopped printing `None -> None` when there are no
+  events to derive the vintage from.
+- `test_pipeline_carrega_icp_antes_do_dbt` no longer pins the `dbt run`
+  subcommand — it broke on its own when we switched to `dbt build`.
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 38 passando (antes: 35) |
-| Os 3 testes de orquestração contra a versão anterior | falham, como esperado |
-| Lint (ruff) | limpo |
-| Comando dbt gerado | parseia como YAML válido, competências corretas |
-| Âncora temporal | 2024-08 → `2024-08-31`; empresa de 05/08/2024 passa de 770 para 26 dias |
-| Diagnóstico com banco vazio | reprova e aponta a causa certa |
-
-> Ainda não verificado com dado real: quantos eventos surgem depois destas
-> correções. É o próximo passo — e o `diagnostico_eventos.py` é quem responde.
+| pytest | 38 passing (previously 35) |
+| The 3 orchestration tests against the previous version | fail, as expected |
+| Lint (ruff) | clean |
+| Generated dbt command | parses as valid YAML, correct vintages |
+| Time anchor | 2024-08 → `2024-08-31`; a company from 2024-08-05 goes from 770 to 26 days |
+| Diagnostic on an empty database | fails and names the right cause |
 
 ---
 
 ## [2.1.5] — 2026-09-14
 
-Ingestão, carga de ICP e **dbt completo** (`PASS=10, ERROR=0`, incluindo
-`evt_new_company`, `gld_icp_matches` e `gld_opportunities`). O pipeline parou
-na etapa seguinte, por forma de invocação.
+Ingestion, ICP load and **the full dbt build** (`PASS=10, ERROR=0`, including
+`evt_new_company`, `gld_icp_matches` and `gld_opportunities`). The pipeline
+stopped at the next stage, on invocation form.
 
-### Corrigido — ALTO
+### Fixed — HIGH
 
-- **Módulos de `src/` chamados como arquivo solto.** O orquestrador executava
-  `python src/enriquecimento.py`, que carrega o arquivo fora do pacote e
-  estoura no primeiro import relativo:
+- **Modules from `src/` invoked as loose files.** The orchestrator ran
+  `python src/enriquecimento.py`, which loads the file outside the package and
+  fails on the first relative import:
   `ImportError: attempted relative import with no known parent package`.
-  `src/digest.py` tem o mesmo formato e falharia logo em seguida.
+  `src/digest.py` has the same shape and would have failed right after.
 
-  A ingestão já era chamada certo (`python -m src.ingestao`) — a
-  inconsistência estava só nas duas últimas etapas, e o README sempre
-  documentou a forma correta.
-  → `python -m src.enriquecimento` e `python -m src.digest`.
+  Ingestion was already invoked correctly (`python -m src.ingestao`) — the
+  inconsistency was only in the last two stages, and the README had always
+  documented the correct form.
+  → `python -m src.enriquecimento` and `python -m src.digest`.
 
-### Adicionado
+### Added
 
-- Dois testes de regressão, ambos verificados contra a versão anterior:
-  - `test_pipeline_invoca_modulos_como_pacote` — nenhuma linha de código do
-    orquestrador pode invocar `python src/<modulo>.py`. Ignora comentários,
-    para que a forma errada possa ser citada na documentação do próprio
-    arquivo sem reprovar o teste.
-  - `test_modulos_com_import_relativo_sao_chamados_com_dash_m` — parametrizado
-    por módulo: se o arquivo usa `from .`, o orquestrador tem de chamá-lo com
-    `python -m`. Cobre automaticamente qualquer módulo novo de `src/`.
+- Two regression tests, both verified against the previous version:
+  - `test_pipeline_invoca_modulos_como_pacote` — no line of orchestrator code
+    may invoke `python src/<module>.py`. It ignores comments, so the wrong
+    form can be cited in the file's own documentation without failing the
+    test.
+  - `test_modulos_com_import_relativo_sao_chamados_com_dash_m` — parameterized
+    per module: if the file uses `from .`, the orchestrator must call it with
+    `python -m`. Automatically covers any new module under `src/`.
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 35 passando (antes: 31) |
-| Os 3 testes novos contra a versão anterior | falham, como esperado |
-| Lint (ruff) | limpo |
-| `python src/enriquecimento.py` | reproduz o ImportError |
-| `python -m src.enriquecimento --help` | funciona |
+| pytest | 35 passing (previously 31) |
+| The 3 new tests against the previous version | fail, as expected |
+| Lint (ruff) | clean |
+| `python src/enriquecimento.py` | reproduces the ImportError |
+| `python -m src.enriquecimento --help` | works |
 
-> Sem `GEMINI_API_KEY` a etapa não falha: o módulo avisa
-> (`[AVISO] GEMINI_API_KEY ausente`) e usa a heurística, marcando a
-> procedência — comportamento já previsto no README.
+> Without `GEMINI_API_KEY` the stage does not fail: the module warns
+> (`[AVISO] GEMINI_API_KEY ausente`) and falls back to the heuristic, marking
+> provenance — behaviour already specified in the README.
 
 ---
 
 ## [2.1.4] — 2026-09-14
 
-Com o Bronze finalmente correto (2,0 M e 2,6 M de estabelecimentos MG nas duas
-competências), o pipeline avançou até o dbt e parou em
+With Bronze finally correct (2.0 M and 2.6 M establishments in Minas Gerais
+across both vintages), the pipeline reached dbt and stopped at
 `Catalog Error: Table with name "config.icp" does not exist`.
 
-### Corrigido — ALTO
+### Fixed — HIGH
 
-- **O orquestrador pulava a carga do ICP.** `run_pipeline.py` ia da ingestão
-  direto para o `dbt run`, mas o README sempre documentou um passo entre os
-  dois: `python scripts/carregar_icp.py`, que materializa `config.icp`,
-  `config.icp_cnae`, `config.icp_municipio` e `config.icp_porte` — lidas por
-  `gld_icp_matches`.
+- **The orchestrator skipped the ICP load.** `run_pipeline.py` went straight
+  from ingestion to `dbt run`, but the README had always documented a step in
+  between: `python scripts/carregar_icp.py`, which materializes `config.icp`,
+  `config.icp_cnae`, `config.icp_municipio` and `config.icp_porte` — all read
+  by `gld_icp_matches`.
 
-  O pipeline vinha funcionando **por acidente**: a tabela sobrevivia dentro de
-  `data/radar.duckdb` de alguma execução manual anterior. Recriar o banco
-  (necessário na 2.1.2 para descartar o Bronze contaminado) revelou a
-  dependência de estado residual — que quebraria igual em qualquer máquina
-  limpa, no CI ou num `git clone`. Isso contraria o requisito de **pipeline
-  idempotente** do Plano Diretor.
-  → Passo incorporado ao orquestrador, antes do dbt. É idempotente
-  (`CREATE OR REPLACE`), custa ~1 s e mantém o ICP em sincronia com o YAML a
-  cada execução, em vez de congelado no que foi carregado um dia.
+  The pipeline had been working **by accident**: the table survived inside
+  `data/radar.duckdb` from some earlier manual run. Recreating the database
+  (necessary in 2.1.2 to discard contaminated Bronze) exposed the dependency
+  on residual state — which would break identically on any clean machine, in
+  CI, or after a `git clone`. This contradicts the master plan's **idempotent
+  pipeline** requirement.
+  → Step folded into the orchestrator, before dbt. It is idempotent
+  (`CREATE OR REPLACE`), costs ~1 s, and keeps the ICP in sync with the YAML
+  on every run instead of frozen at whatever was loaded once.
 
-### Adicionado
+### Added
 
-- Teste `test_pipeline_carrega_icp_antes_do_dbt`: verifica que
-  `run_pipeline.py` invoca `carregar_icp.py` **antes** do `dbt run`. Confirmado
-  que falha contra a versão anterior.
+- `test_pipeline_carrega_icp_antes_do_dbt`: asserts that `run_pipeline.py`
+  invokes `carregar_icp.py` **before** dbt. Verified to fail against the
+  previous version.
 
-### Alterado
+### Changed
 
-- `run_pipeline.py` passa no ruff (9 avisos pré-existentes: ordenação de
-  imports, espaços em branco, `result` e `e` atribuídos sem uso). O README já
-  mandava incluí-lo no lint.
-- Etapas renumeradas para 1A, 1B, 2 … 5.
+- `run_pipeline.py` passes ruff (9 pre-existing warnings: import ordering,
+  whitespace, `result` and `e` assigned but unused). The README already
+  required it to be linted.
+- Stages renumbered to 1A, 1B, 2 … 5.
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 31 passando (antes: 30) |
-| Teste novo contra a versão anterior | falha, como esperado |
-| Lint (ruff), agora incluindo `run_pipeline.py` | limpo |
-| `carregar_icp.py` em banco sem o schema | cria as 4 tabelas (1 ICP, 9 CNAEs, 3 municípios, 2 portes) |
-
-### Pendente — decisão do Gabriel
-
-- O orquestrador roda `dbt run`, que **não executa os 24 testes de dados**. O
-  README define `dbt build` como o comando de qualidade, e é o `build` que
-  roda `assert_evento_nao_existe_na_competencia_anterior` — descrito no próprio
-  README como o teste sem o qual "o produto perde credibilidade". Trocar
-  `run` por `build` faz o pipeline validar o que produziu; não foi feito aqui
-  para não misturar uma mudança de comportamento com a correção do bloqueio.
+| pytest | 31 passing (previously 30) |
+| New test against the previous version | fails, as expected |
+| Lint (ruff), now including `run_pipeline.py` | clean |
+| `carregar_icp.py` on a database without the schema | creates all 4 tables (1 ICP, 9 CNAEs, 3 municipalities, 2 sizes) |
 
 ---
 
 ## [2.1.3] — 2026-09-14
 
-A 2.1.2 declarou `encoding='latin-1'` por todo o pipeline — o que a cartilha
-manda e o que a maior parte da documentação sobre os Dados Abertos do CNPJ
-repete. Estava **incompleto**: a carga passou a abortar com
-`Invalid Input Error: File is not latin-1 encoded` em `Estabelecimentos`.
+2.1.2 declared `encoding='latin-1'` throughout the pipeline — what the
+handbook prescribes and what most documentation about the CNPJ open data
+repeats. It was **incomplete**: the load started aborting with
+`Invalid Input Error: File is not latin-1 encoded` on `Estabelecimentos`.
 
-### Corrigido — CRÍTICO
+### Fixed — CRITICAL
 
-- **A fonte não é latin-1; é Windows-1252.** Os arquivos trazem bytes
-  `0x80–0x9F`, faixa que o ISO-8859-1 reserva para controle e que o
-  Windows-1252 usa para aspas curvas (`“ ”`), travessão (`–`), reticências
-  (`…`) e apóstrofo (`’`) — resíduo de texto digitado no Windows, corriqueiro
-  em `nome_fantasia`. Tabelas de domínio (vocabulário controlado) não têm
-  esses bytes; os arquivos de texto livre têm.
+- **The source is not latin-1; it is Windows-1252.** The files carry bytes
+  `0x80–0x9F`, a range ISO-8859-1 reserves for control characters and
+  Windows-1252 uses for curly quotes (`" "`), en dashes (`–`), ellipses (`…`)
+  and apostrophes (`'`) — residue of text typed on Windows, routine in trade
+  names. Lookup tables (controlled vocabulary) contain no such bytes;
+  free-text files do.
 
-  O leitor CSV do DuckDB não resolve isso em nenhuma configuração:
+  DuckDB's CSV reader cannot resolve this in any configuration:
 
-  | Tentativa | Resultado |
+  | Attempt | Result |
   |---|---|
-  | `encoding='latin-1'` | aborta: *"File is not latin-1 encoded"* |
-  | `encoding='latin-1'` + `ignore_errors` | aborta igual — é falha dura, não rejeição de linha |
-  | `encoding='cp1252'` / `'windows-1252'` / `'iso-8859-1'` | *"The CSV Reader does not support the encoding"* (só aceita utf-8, utf-16, latin-1) |
-  | `encoding='utf-8'` | erro interno e, em seguida, **conexão invalidada** |
+  | `encoding='latin-1'` | aborts: *"File is not latin-1 encoded"* |
+  | `encoding='latin-1'` + `ignore_errors` | aborts identically — it is a hard failure, not a row rejection |
+  | `encoding='cp1252'` / `'windows-1252'` / `'iso-8859-1'` | *"The CSV Reader does not support the encoding"* (only utf-8, utf-16, latin-1) |
+  | `encoding='utf-8'` | internal error and then an **invalidated connection** |
 
-  → A normalização passou para a **extração** (`extrair`): o conteúdo sai do
-  ZIP convertido de cp1252 para **UTF-8**, e daí para frente o pipeline inteiro
-  lê UTF-8. Como a extração já grava o arquivo, converter em streaming **não
-  custa I/O adicional**. cp1252 é single-byte, então nenhum caractere cruza a
-  fronteira entre blocos.
+  → Normalization moved into **extraction** (`extrair`): content leaves the
+  ZIP converted from cp1252 to **UTF-8**, and the whole pipeline reads UTF-8
+  from there on. Since extraction already writes the file, converting in
+  streaming costs **no additional I/O**. cp1252 is single-byte, so no
+  character crosses a chunk boundary.
 
-  Ganho colateral: `“ ”` e `–` são **preservados** como caracteres, em vez de
-  virarem `?` ou serem trocados por aspas ASCII — o que, sendo `"` o caractere
-  de aspas do CSV, corromperia a própria estrutura do arquivo.
+  Side benefit: `" "` and `–` are **preserved** as characters instead of
+  becoming `?` or being swapped for ASCII quotes — which, since `"` is the CSV
+  quote character, would corrupt the file structure itself.
 
-### Alterado
+### Changed
 
-- `extrair` passa a gravar o membro pelo **nome base** em vez de recriar a
-  árvore interna do ZIP. Os arquivos da RFB são planos; de quebra, elimina
-  o risco de *zip slip*.
-- `ENCODING_RFB` agora significa "como o pipeline grava e lê"
-  (`utf-8`); `ENCODING_FONTE` (`cp1252`) descreve a origem.
+- `extrair` now writes the member under its **base name** instead of
+  recreating the ZIP's internal tree. The tax authority's files are flat; as a
+  bonus this removes any *zip slip* risk.
+- `ENCODING_RFB` now means "how the pipeline writes and reads" (`utf-8`);
+  `ENCODING_FONTE` (`cp1252`) describes the origin.
 
-### Adicionado
+### Added
 
-- **Fixtures passam a ser gravadas em cp1252**, com um CNAE contendo aspa
-  curva e travessão. Conferido: contra a 2.1.2 essas fixtures reproduzem o
-  erro exato (*"File is not latin-1 encoded"*); contra esta versão, carregam
-  preservando os caracteres.
-- 2 testes: `extrair` devolve UTF-8 válido com os caracteres certos, e o
-  caminho completo ZIP → extração → carga com bytes C1.
+- **Fixtures are now written in cp1252**, with one CNAE containing a curly
+  quote and an en dash. Verified: against 2.1.2 these fixtures reproduce the
+  exact error (*"File is not latin-1 encoded"*); against this version they
+  load with the characters preserved.
+- 2 tests: `extrair` returns valid UTF-8 with the right characters, and the
+  full ZIP → extraction → load path with C1 bytes.
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 30 passando (antes: 28) |
-| Lint (ruff) | limpo |
-| Fixtures cp1252 contra a 2.1.2 | falham com o erro original — regressão coberta |
-| Ingestão end-to-end com `--uf MG` | 287 estabelecimentos, 14 CNAEs |
-| Caracteres preservados | `Comércio de peças “genuínas” – sob encomenda` |
+| pytest | 30 passing (previously 28) |
+| Lint (ruff) | clean |
+| cp1252 fixtures against 2.1.2 | fail with the original error — regression covered |
+| End-to-end ingestion with `--uf MG` | 287 establishments, 14 CNAEs |
+| Characters preserved | `Comércio de peças "genuínas" – sob encomenda` |
 
-> Diagnóstico apoiado em varredura dos 256 valores de byte no leitor do
-> DuckDB: sob `latin-1` ele recusa exatamente a faixa `0x80–0x9F`.
+> Diagnosis backed by sweeping all 256 byte values through DuckDB's reader:
+> under `latin-1` it rejects exactly the `0x80–0x9F` range.
 
 ---
 
 ## [2.1.2] — 2026-09-14
 
-A carga com **dados reais** quebrava em `Estabelecimentos` e — pior —
-**tinha sucesso aparente com dados errados** nas demais tabelas. Três defeitos
-independentes de parsing, todos na mesma origem: o código lia os arquivos da
-Receita num formato que não é o deles.
+The load with **real data** was breaking on `Estabelecimentos` and — worse —
+**succeeding with wrong data** on the other tables. Three independent parsing
+defects, all from the same root cause: the code read the tax authority's files
+in a format that is not theirs.
 
-> **Regressão de processo.** As correções descritas na 2.1.1 (leitura linha a
-> linha dos domínios; `store_rejects`) **não estavam mais no código**:
-> `src/ingestao.py` foi reescrito em 13/09 e as perdeu, enquanto o CHANGELOG
-> seguia afirmando que existiam. A suíte não acusou nada — ver
-> *Corrigido — testes que não podiam falhar*, abaixo.
+> **Process regression.** The fixes described in 2.1.1 (line-by-line reading
+> of lookup tables; `store_rejects`) **were no longer in the code**:
+> `src/ingestao.py` was rewritten on 13/09 and lost them, while the CHANGELOG
+> kept claiming they existed. The test suite raised nothing — see *Fixed —
+> tests that could not fail*, below.
 
-### Corrigido — CRÍTICO
+### Fixed — CRITICAL
 
-- **Encoding errado: linhas acentuadas sumiam em silêncio.** Os arquivos da
-  Receita são `latin-1` (cartilha §2.1, "pegadinhas da fonte"), mas a carga
-  não declarava encoding e o DuckDB assumia UTF-8. Bytes acentuados são
-  sequências UTF-8 inválidas; com `ignore_errors=true`, **a linha inteira era
-  descartada sem aviso**. No arquivo real de CNAEs: **145 das 1.359 linhas
-  carregadas** — exatamente as 145 que não têm um único acento. Um CNAE
-  ausente é uma empresa que deixa de casar com o ICP.
-  → `encoding='latin-1'` explícito em todas as leituras.
+- **Wrong encoding: accented rows vanished silently.** The files are `latin-1`
+  (handbook §2.1, "source gotchas"), but the load declared no encoding and
+  DuckDB assumed UTF-8. Accented bytes are invalid UTF-8 sequences; with
+  `ignore_errors=true`, **the entire row was discarded without warning**. On
+  the real CNAE file: **145 of 1,359 rows loaded** — exactly the 145 that
+  contain no accent at all. A missing CNAE is a company that stops matching
+  the ICP.
+  → Explicit `encoding='latin-1'` on every read.
 
-- **`quote=''`: aspas entravam no dado e o filtro de UF nunca casava.** Os
-  campos da Receita vêm entre aspas duplas (`"0111301";"Cultivo de arroz"`).
-  Com as aspas desligadas, o valor lido era `"MG"` — com as aspas — e
-  `WHERE column19 = 'MG'` não casava com nada. Era essa a causa de
-  `estabelecimentos  0 linhas` numa competência inteira, sem erro algum.
-  As demais tabelas carregavam "com sucesso" com **todos os valores
-  poluídos por aspas** (`"ALPHA LTDA"`, `"0,00"`).
-  → `quote='"'`, que também faz um `;` **dentro** de campo
-  (`"LOJA A; LOJA B"`) parar de virar coluna extra — origem do
+- **`quote=''`: quotes entered the data and the state filter never matched.**
+  Fields come wrapped in double quotes (`"0111301";"Cultivo de arroz"`). With
+  quoting disabled, the value read was `"MG"` — quotes included — and
+  `WHERE column19 = 'MG'` matched nothing. That was the cause of
+  `estabelecimentos  0 linhas` for an entire vintage, with no error
+  whatsoever. The other tables loaded "successfully" with **every value
+  polluted by quotes** (`"ALPHA LTDA"`, `"0,00"`).
+  → `quote='"'`, which also stops a `;` **inside** a field
+  (`"LOJA A; LOJA B"`) from becoming an extra column — the origin of the
   `Error when sniffing file ... ESTABELE` / *"columns are set as 30, sniffer
-  found 31"* que travava a ingestão.
+  found 31"* that was halting ingestion.
 
-- **Contador de rejeições fixo em zero.** `_carregar_parquet` terminava com
-  `return inseridas, 0`. Toda a guarda de `LIMIAR_REJEICAO` — que deveria
-  abortar a carga quando o layout muda — era **código morto**: nenhuma
-  rejeição jamais era contada, então a razão nunca passava de 0%.
-  → `store_rejects=true` com contagem real. Conta **linhas distintas**
-  (`COUNT(DISTINCT (file_id, line))`) e não registros de erro: o DuckDB emite
-  um erro por coluna excedente, e somá-los inflaria a razão a ponto de
-  disparar o limiar numa base saudável.
+- **Rejection counter hardcoded to zero.** `_carregar_parquet` ended with
+  `return inseridas, 0`. The entire `LIMIAR_REJEICAO` guard — which should
+  abort the load when the layout changes — was **dead code**: no rejection was
+  ever counted, so the ratio never exceeded 0%.
+  → `store_rejects=true` with real counting. It counts **distinct rows**
+  (`COUNT(DISTINCT (file_id, line))`) rather than error records: DuckDB emits
+  one error per excess column, and summing those would inflate the ratio
+  enough to trip the threshold on a healthy base.
 
-### Corrigido — ALTO
+### Fixed — HIGH
 
-- **Sniffer abortava o arquivo inteiro.** Mesmo com o dialeto correto, o
-  DuckDB ainda tentava deduzi-lo e falhava quando as linhas ruins confundiam a
-  amostra — derrubando a fatia inteira em vez de rejeitar as linhas.
-  → `auto_detect=false`. Já declaramos delimitador, aspas, encoding e colunas;
-  não há o que adivinhar. O pior caso passa a ser "tudo rejeitado e
-  contabilizado" (diagnosticável) em vez de uma exceção opaca.
+- **The sniffer aborted whole files.** Even with the correct dialect, DuckDB
+  still tried to infer it and failed when bad rows confused the sample —
+  taking down the entire shard instead of rejecting the rows.
+  → `auto_detect=false`. Delimiter, quoting, encoding and columns are already
+  declared; there is nothing to guess. The worst case becomes "everything
+  rejected and counted" (diagnosable) rather than an opaque exception.
 
-- **Domínios voltaram a ser lidos linha a linha** (técnica da 2.1.1, perdida
-  na reescrita): delimitador `\x07` e corte no primeiro `;`. Sem
-  `ignore_errors`, de propósito — aqui perder uma linha é perder um CNAE.
+- **Lookup tables read line by line again** (the 2.1.1 technique, lost in the
+  rewrite): `\x07` delimiter and split on the first `;`. Deliberately without
+  `ignore_errors` — here, losing a row means losing a CNAE.
 
-- **Colisão de `reject_scans` entre tabelas.** `store_rejects` materializa
-  duas tabelas; nomear só a de erros fazia a segunda chamada na mesma conexão
-  falhar com *"Reject Scan Table name reject_scans is already in use"*.
-  → `rejects_scan` nomeado por tabela.
+- **`reject_scans` collision between tables.** `store_rejects` materializes two
+  tables; naming only the error one made the second call on the same
+  connection fail with *"Reject Scan Table name reject_scans is already in
+  use"*.
+  → `rejects_scan` named per table.
 
-- **Limiar de rejeição media contra o denominador errado.** Comparava
-  rejeitadas contra *carregadas*; com `--uf MG`, "carregadas" é só Minas
-  enquanto as rejeições vêm do país inteiro, e a razão não significa nada.
-  → Passa a medir contra o total de linhas do arquivo, contado apenas
-  **quando há alguma rejeição** (no caminho saudável, custo zero).
+- **Rejection threshold measured against the wrong denominator.** It compared
+  rejected against *loaded*; with `--uf MG`, "loaded" counts only Minas Gerais
+  while rejections come from the whole country, so the ratio is meaningless.
+  → Now measured against the file's total line count, computed only **when
+  there is at least one rejection** (zero cost on the healthy path).
 
-### Corrigido — testes que não podiam falhar
+### Fixed — tests that could not fail
 
-A suíte passava **21/21 contra o código quebrado**. Dois testes eram
-decorativos:
+The suite passed **21/21 against thoroughly broken code**. Two tests were
+decorative:
 
-- `test_dominio_com_ponto_e_virgula_na_descricao` reimplementava o SQL
-  **dentro do próprio teste**, validando a técnica e não o código de
-  produção. Quando `ingestao.py` perdeu a técnica, o teste seguiu verde.
-- `test_limiar_de_rejeicao_configurado` só verificava o **valor da constante**
-  (`0 < LIMIAR <= 0.05`), nunca que rejeições fossem contadas — passava
-  tranquilamente com `return inseridas, 0`.
+- `test_dominio_com_ponto_e_virgula_na_descricao` reimplemented the SQL
+  **inside the test itself**, validating the technique and not the production
+  code. When `ingestao.py` lost the technique, the test stayed green.
+- `test_limiar_de_rejeicao_configurado` only checked the **constant's value**
+  (`0 < LIMIAR <= 0.05`), never that rejections were counted — it passed
+  happily with `return inseridas, 0`.
 
-→ 7 testes novos que chamam as **funções de produção** e falham contra o
-código anterior: linha de domínio preservada, acento preservado, `;` dentro de
-campo, filtro de UF com valor entre aspas, rejeição contabilizada, uma linha
-ruim = uma rejeição, e arquivo todo malformado sem aborto de sniffing.
+→ 7 new tests that call the **production functions** and fail against the
+previous code: lookup row preserved, accent preserved, `;` inside a field,
+state filter with a quoted value, rejection counted, one bad row equals one
+rejection, and a fully malformed file not aborting on sniffing.
 
-### Adicionado
+### Added
 
-- **Fixtures com acento.** As fixtures eram ASCII puro ("TRES CORACOES",
-  "Comercio"), e em ASCII `latin-1` e UTF-8 são byte a byte idênticos — por
-  isso o CI passava enquanto o dado real quebrava. Municípios, CNAEs e razões
-  sociais agora carregam acentos, e ~5% dos nomes fantasia carregam um `;`
-  dentro do campo. Um comentário no arquivo explica que os acentos não são
-  decoração.
+- **Fixtures with accents.** The fixtures were pure ASCII ("TRES CORACOES",
+  "Comercio"), and in ASCII `latin-1` and UTF-8 are byte-for-byte identical —
+  which is why CI passed while real data broke. Municipalities, CNAEs and
+  trade names now carry accents, and ~5% of trade names carry a `;` inside the
+  field. A comment in the file explains that the accents are not decoration.
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 28 passando (antes: 21) |
-| Os 7 testes novos contra o código anterior | 7 falhando, como esperado |
-| Lint (ruff) | limpo |
-| CNAEs reais (`F.K03200$Z.D40810.CNAECSV`) | 1.359/1.359 lidos (antes: 145) |
-| Acentuação em dado real | `Produção de sementes certificadas` íntegro |
-| `;` dentro de campo | `LOJA A; LOJA B` preservado, sem coluna extra |
-| Ingestão end-to-end com `--uf MG` | 289 estabelecimentos (antes: 0) |
+| pytest | 28 passing (previously 21) |
+| The 7 new tests against the previous code | 7 failing, as expected |
+| Lint (ruff) | clean |
+| Real CNAE file (`F.K03200$Z.D40810.CNAECSV`) | 1,359/1,359 rows read (previously 145) |
+| Accents on real data | `Produção de sementes certificadas` intact |
+| `;` inside a field | `LOJA A; LOJA B` preserved, no extra column |
+| End-to-end ingestion with `--uf MG` | 289 establishments (previously 0) |
 
-> As contagens de CNAE foram medidas sobre o arquivo real já baixado em
-> `data/raw/2024-08/`. A carga real completa (todas as 10 fatias) segue
-> pendente de uma janela em que a infraestrutura da RFB coopere.
+> CNAE counts measured against the real file already downloaded under
+> `data/raw/2024-08/`. The complete production load (all ten shards) remains
+> pending a window in which the tax authority's infrastructure cooperates.
 
 ---
 
 ## [2.1.1] — 2026-09-08
 
-Primeira execução com **dados reais** da Receita. O download das 22 fatias
-funcionou (confirmando a correção 2.1.0); a carga quebrou no parsing.
+First execution with **real data**. The download of all 22 files worked
+(confirming the 2.1.0 fix); the load broke on parsing.
 
-### Corrigido — CRÍTICO
+### Fixed — CRITICAL
 
-- **Arquivos de domínio abortavam a carga inteira.** O parser CSV falhava com
+- **Lookup files aborted the entire load.** The CSV parser failed with
   `Error when sniffing file ... CNAECSV` / *"columns are set as 2, sniffer
   found 3"*.
-  **Causa raiz:** os arquivos da Receita são inconsistentes — parte das linhas
-  vem sem aspas, e algumas descrições contêm `;`. Uma linha como
+  **Root cause:** the files are inconsistent — some rows come without quotes,
+  and some descriptions contain `;`. A row such as
 
   ```
   4618401;Representantes comerciais; agentes do comercio
   ```
 
-  faz o parser enxergar 3 campos e abortar a leitura do arquivo inteiro.
-  → Passamos a ler a **linha inteira como campo único** (delimitador `\x07`,
-  ausente no arquivo) e a partir no **primeiro `;`**. Como o código nunca
-  contém `;`, tudo à direita é a descrição — não importa quantos `;` ela tenha
-  nem se está entre aspas. **Zero linhas perdidas.**
-  Descartamos `ignore_errors=true`: descartaria a linha em silêncio, e perder
-  um CNAE significa empresas deixando de casar com o ICP.
+  makes the parser see 3 fields and abort reading the whole file.
+  → We now read the **entire line as a single field** (delimiter `\x07`,
+  absent from the file) and split on the **first `;`**. Since the code never
+  contains `;`, everything to the right is the description — no matter how
+  many semicolons it holds or whether it is quoted. **Zero rows lost.**
+  We discarded `ignore_errors=true`: it would drop the row silently, and
+  losing a CNAE means companies stop matching the ICP.
 
-### Corrigido — ALTO
+### Fixed — HIGH
 
-- **Arquivos largos sem tolerância a linha malformada.** `Estabelecimentos`
-  (30 colunas) tem a mesma classe de defeito, e uma única linha ruim derrubaria
-  a fatia inteira.
-  → `ignore_errors=true` + **`store_rejects=true`**: linhas ruins não derrubam
-  a carga, mas também **não somem em silêncio** — são contabilizadas e
-  exibidas. Acima de **1%** de rejeição a ingestão falha com mensagem
-  apontando o dicionário de layout, porque aí o problema não é "linha ruim" e
-  sim "layout mudou".
+- **Wide files had no tolerance for a malformed row.** `Estabelecimentos`
+  (30 columns) has the same class of defect, and a single bad row would take
+  down the whole shard.
+  → `ignore_errors=true` + **`store_rejects=true`**: bad rows no longer bring
+  the load down, but they also **do not vanish silently** — they are counted
+  and displayed. Above **1%** rejection the ingestion fails with a message
+  pointing at the layout dictionary, because at that point the problem is not
+  "a bad row" but "the layout changed".
 
-- **Competência assumida pelo calendário.** `run_pipeline.py` usava o mês
-  corrente como competência atual. Como a Receita publica com semanas de
-  defasagem, em 08/09 o pipeline tentava processar `2026-09`, ainda não
-  publicada.
-  → O orquestrador agora **descobre** a última competência publicada e valida
-  que atual e anterior existem no share antes de começar, listando as
-  disponíveis quando não existem.
+- **Vintage assumed from the calendar.** `run_pipeline.py` used the current
+  month as the current vintage. Since the tax authority publishes with weeks
+  of lag, on 08/09 the pipeline tried to process `2026-09`, not yet published.
+  → The orchestrator now **discovers** the latest published vintage and
+  validates that both current and previous exist in the share before starting,
+  listing what is available when they do not.
 
-### Adicionado
+### Added
 
-- Fixtures sintéticas passam a reproduzir os **defeitos reais** da Receita:
-  descrição com `;`, aspas internas e 1 em cada 3 linhas sem aspas. O CI agora
-  detectaria essa regressão sozinho.
-- 2 testes de regressão (parsing sujo sem perda de linha; limiar de rejeição).
-- Relatório de linhas rejeitadas por tabela na saída da ingestão.
+- Synthetic fixtures now reproduce the source's **real defects**: descriptions
+  with `;`, internal quotes, and 1 in 3 rows without quotes. CI would now
+  catch that regression on its own.
+- 2 regression tests (dirty parsing without row loss; rejection threshold).
+- Per-table rejected-row report in the ingestion output.
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Testes pytest | 21 passando (antes: 19) |
-| Testes dbt | 34 passando |
-| Lint (ruff) | limpo |
-| CNAEs patológicos | 12/12 lidos, `;` preservado na descrição |
-| Pipeline end-to-end | OK |
+| pytest | 21 passing (previously 19) |
+| dbt tests | 34 passing |
+| Lint (ruff) | clean |
+| Pathological CNAEs | 12/12 read, `;` preserved in the description |
+| End-to-end pipeline | OK |
 
-> Nota: numa descrição com aspa não escapada (`peças 1" e 2"`), a aspa final é
-> removida — ambiguidade insolúvel sem conhecer o escape da RFB. A linha é
-> preservada, que é o que importa.
+> Note: in a description with an unescaped quote (`peças 1" e 2"`), the
+> trailing quote is removed — an ambiguity unsolvable without knowing the
+> source's escaping rule. The row is preserved, which is what matters.
 
 ---
 
 ## [2.1.0] — 2026-09-08
 
-Correção de fonte de dados. Todos os endereços do projeto foram revisados
-contra o que está efetivamente no ar.
+Data-source correction. Every address in the project was verified against what
+is actually online.
 
-### Corrigido — CRÍTICO
+### Fixed — CRITICAL
 
-- **Host de download desativado.** O projeto apontava para
-  `dadosabertos.rfb.gov.br/CNPJ/dados_abertos_cnpj/AAAA-MM/` e variações em
-  `arquivos.receitafederal.gov.br/.../dados_abertos_cnpj/`. **Ao final de
-  janeiro/2026 a Receita Federal migrou a publicação** para um
-  compartilhamento WebDAV (Nextcloud), e os caminhos antigos deixaram de
-  existir. Isso explica por que nenhum espelho respondia e por que a
-  ingestão de `Estabelecimentos` nunca concluiu.
-  → Novo módulo `src/receita.py` conversa com o share atual:
-  - listagem via `PROPFIND` em
+- **Download host decommissioned.** The project pointed at
+  `dadosabertos.rfb.gov.br/CNPJ/dados_abertos_cnpj/AAAA-MM/` and variants on
+  `arquivos.receitafederal.gov.br/.../dados_abertos_cnpj/`. **At the end of
+  January 2026 the tax authority migrated publication** to a WebDAV
+  (Nextcloud) share, and the old paths ceased to exist. That explains why no
+  mirror responded and why `Estabelecimentos` ingestion never completed.
+  → New `src/receita.py` module talks to the current share:
+  - listing via `PROPFIND` on
     `arquivos.receitafederal.gov.br/public.php/webdav`;
-  - download em
-    `arquivos.receitafederal.gov.br/public.php/dav/files/<token>/<AAAA-MM>/<arquivo>`.
+  - download at
+    `arquivos.receitafederal.gov.br/public.php/dav/files/<token>/<AAAA-MM>/<file>`.
 
-- **Adivinhação de competência substituída por descoberta.** A versão anterior
-  varria até 12 meses testando URLs para achar qual existia — desperdício de
-  requisições e fonte de falsos negativos.
-  → O pipeline agora **lista** o que a Receita publicou. `--competencia`
-  passou a ser opcional (default: a mais recente publicada), e
-  `python -m src.ingestao --listar` mostra competências e arquivos
-  disponíveis.
+- **Vintage guessing replaced by discovery.** The previous version scanned up
+  to 12 months testing URLs to find which existed — wasted requests and a
+  source of false negatives.
+  → The pipeline now **lists** what has been published. `--competencia` became
+  optional (default: the most recent), and `python -m src.ingestao --listar`
+  shows available vintages and files.
 
-- **Mirror comunitário removido.** A versão anterior caía, como último
-  recurso, num mirror do GitHub congelado em `2024.09`. Um pipeline de
-  detecção de eventos que silenciosamente usa dados de dois anos atrás produz
-  um digest inteiro de "empresas novas" falsas.
-  → Removido. Falha explícita é melhor que dado velho disfarçado de atual.
+- **Community mirror removed.** The previous version fell back, as a last
+  resort, to a GitHub mirror frozen at `2024.09`. An event-detection pipeline
+  that silently uses two-year-old data produces an entire digest of fake "new
+  companies".
+  → Removed. Explicit failure beats stale data disguised as current.
 
-### Alterado
+### Changed
 
-- **Share token configurável.** `RADAR_RFB_SHARE_TOKEN` permite trocar o token
-  sem editar código, caso a Receita publique um novo compartilhamento. A
-  mensagem de erro ensina como obtê-lo.
-- **Diagnóstico acionável.** Falhas de listagem distinguem "host fora do ar"
-  de "token inválido/mudou", com instruções específicas em cada caso.
-- **README** ganhou tabela de endereços oficiais, nota sobre a migração de
-  janeiro/2026 e o procedimento de troca de token.
-- `src/config.py` centraliza os endereços, incluindo o catálogo no
+- **Configurable share token.** `RADAR_RFB_SHARE_TOKEN` allows swapping the
+  token without editing code, should the tax authority publish a new share.
+  The error message explains how to obtain it.
+- **Actionable diagnostics.** Listing failures distinguish "host down" from
+  "invalid/changed token", with specific instructions for each.
+- **README** gained a table of official addresses, a note about the January
+  2026 migration, and the token-rotation procedure.
+- `src/config.py` centralizes the addresses, including the
   [dados.gov.br](https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj)
-  e o [dicionário de layout](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf).
+  catalogue and the
+  [layout dictionary](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf).
 
-### Adicionado
+### Added
 
-- 5 testes de regressão: extração de competências e de arquivos do XML
-  WebDAV, exclusão de não-ZIP na listagem, formato da URL de download e —
-  via AST — a garantia de que nenhum módulo volte a **apontar** para os hosts
-  desativados (comentários e docstrings podem citá-los para documentar a
-  migração).
+- 5 regression tests: vintage and file extraction from the WebDAV XML,
+  exclusion of non-ZIP entries from listings, download URL format, and — via
+  AST — the guarantee that no module again **points** at the decommissioned
+  hosts (comments and docstrings may cite them to document the migration).
 
-### Verificação
+### Verification
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Lint (ruff) | limpo |
-| Testes pytest | 19 passando (antes: 14) |
-| Testes dbt | 34 passando |
-| Pipeline end-to-end | OK |
-| Parser WebDAV | validado contra XML no formato Nextcloud |
+| Lint (ruff) | clean |
+| pytest | 19 passing (previously 14) |
+| dbt tests | 34 passing |
+| End-to-end pipeline | OK |
+| WebDAV parser | validated against Nextcloud-format XML |
 
-> O download com dados reais ainda depende da disponibilidade da
-> infraestrutura da RFB, historicamente instável. Os endereços agora estão
-> corretos; a primeira carga real segue pendente.
+> Downloading real data still depends on the availability of the tax
+> authority's infrastructure, historically unstable. The addresses are now
+> correct; the first real load remains pending.
 
 ---
 
 ## [2.0.0] — 2026-09-07
 
-Refatoração estrutural após auditoria completa do código. O objetivo foi
-fechar a distância entre o que o Plano Diretor V2 **declara** e o que o
-repositório **implementava**: vários princípios inegociáveis (idempotência,
-"a IA nunca inventa", ICP desacoplado, score explicável com fatores) estavam
-escritos no documento mas ausentes do código.
+Structural refactor following a full code audit. The goal was to close the gap
+between what the master plan **declares** and what the repository
+**implemented**: several non-negotiable principles (idempotence, "the AI never
+invents", decoupled ICP, explainable score with factors) were written in the
+document but absent from the code.
 
-Estado anterior: o pipeline nunca havia executado com dados reais. O banco
-versionado continha 3 estabelecimentos fictícios (`11111111`, `22222222`,
-`33333333`), e o digest gerado era integralmente sintético.
+Prior state: the pipeline had never run with real data. The versioned database
+contained 3 fictional establishments (`11111111`, `22222222`, `33333333`), and
+the generated digest was entirely synthetic.
 
-### Corrigido — CRÍTICO
+### Fixed — CRITICAL
 
-- **Conteúdo fabricado apresentado como análise de IA.**
-  `gerar_mock()` devolvia texto inventado ("Escritório focado em assessoria
-  contábil e fiscal") com `confianca_ia: "Alta"` fixo, renderizado pelo digest
-  sob o título "Inteligência Comercial (Contexto da IA)", indistinguível de
-  saída real. Violava os princípios 6 e 7 do Plano Diretor e representava
-  risco reputacional direto na validação com clientes.
-  → Agora toda linha enriquecida carrega `origem` (`llm` | `heuristica`) e
-  `modelo`. O digest estampa a procedência em cada oportunidade e exibe um
-  aviso no topo quando há itens sem interpretação de IA. O fallback deixou de
-  imitar análise: declara "não inferido" nos campos que dependem do modelo.
+- **Fabricated content presented as AI analysis.** `gerar_mock()` returned
+  invented text ("Firm focused on accounting and tax advisory") with a
+  hardcoded `confianca_ia: "Alta"`, rendered by the digest under the heading
+  "Commercial Intelligence (AI Context)", indistinguishable from real output.
+  It violated principles 6 and 7 of the master plan and posed a direct
+  reputational risk during client validation.
+  → Every enriched row now carries `origem` (`llm` | `heuristica`) and
+  `modelo`. The digest stamps provenance on each opportunity and displays a
+  warning at the top when any item lacks AI interpretation. The fallback
+  stopped imitating analysis: it declares "not inferred" on the fields that
+  depend on the model.
 
-- **Falhas de IA mascaradas silenciosamente.**
-  Um `except Exception` genérico capturava qualquer erro (chave inválida,
-  rate limit, modelo aposentado, timeout) e o substituía por texto inventado,
-  sem contagem nem alerta.
-  → Falhas passam a ser contadas, registradas e reportadas. Acima de 30% de
-  taxa de falha, a execução é interrompida com mensagem acionável, em vez de
-  produzir um digest degradado.
+- **AI failures silently masked.** A generic `except Exception` caught any
+  error (invalid key, rate limit, retired model, timeout) and replaced it with
+  invented text, with no count and no alert.
+  → Failures are now counted, logged and reported. Above a 30% failure rate
+  the run stops with an actionable message instead of producing a degraded
+  digest.
 
-- **Ausência de diff entre competências — o Event Store não existia de fato.**
-  A ingestão usava `CREATE OR REPLACE TABLE`, sem coluna de competência nem
-  particionamento: existia uma única foto, sobrescrita a cada execução.
-  `evt_new_company` detectava empresas novas por
-  `data_inicio_atividade >= current_date - 30`, o atalho que a cartilha havia
-  descartado. Consequências: resultado variava conforme o dia da execução
-  (não idempotente); empresas incluídas com data retroativa eram perdidas; e
-  não havia fundação para nenhum outro evento do catálogo.
-  → Competência passa a ser cidadã de primeira classe. Bronze grava
-  `data/bronze/<tabela>/competencia=AAAA-MM/*.parquet`. `evt_new_company` usa
-  **set difference** real entre a competência atual e a anterior — a mesma
-  mecânica que sustentará `STATUS_CHANGED`, `PARTNER_*` e demais eventos.
+- **No diff between vintages — the Event Store did not actually exist.**
+  Ingestion used `CREATE OR REPLACE TABLE`, with no vintage column and no
+  partitioning: there was a single snapshot, overwritten on every run.
+  `evt_new_company` detected new companies via
+  `data_inicio_atividade >= current_date - 30`, the shortcut the handbook had
+  explicitly rejected. Consequences: results varied by run date (not
+  idempotent); companies entered with retroactive dates were lost; and there
+  was no foundation for any other event in the catalogue.
+  → Vintage became a first-class citizen. Bronze writes
+  `data/bronze/<table>/competencia=AAAA-MM/*.parquet`. `evt_new_company` uses
+  a real **set difference** between current and previous vintage — the same
+  mechanic that will support `STATUS_CHANGED`, `PARTNER_*` and the rest.
 
-- **Ingestão incompleta.** Baixava apenas `Estabelecimentos0.zip` (1 de 10
-  fatias, ~10% do país) — insuficiente para um ICP municipal, podendo zerar
-  o digest.
-  → Baixa as 10 fatias de `Estabelecimentos` e `Empresas`, com filtro
-  opcional por UF para desenvolvimento (`--uf MG`).
+- **Incomplete ingestion.** It downloaded only `Estabelecimentos0.zip` (1 of
+  10 shards, ~10% of the country) — insufficient for a municipal ICP, and
+  capable of emptying the digest.
+  → Downloads all 10 shards of `Estabelecimentos` and `Empresas`, with an
+  optional state filter for development (`--uf MG`).
 
-### Corrigido — ALTO
+### Fixed — HIGH
 
-- **Filtro de ICP inócuo (`ilike '%ti%'`).** O padrão casava com
-  "A-**TI**-vidades", presente em boa parte dos CNAEs brasileiros, além de
-  "cosmé**ti**cos" e "Par**ti**cipação". Na prática, o filtro de segmento não
-  filtrava: o ICP era "qualquer empresa em Varginha".
-  → Casamento passa a ser por **código CNAE**, com listas de primários,
-  secundários e **excluídos** (um escritório de contabilidade não deve
-  prospectar outro escritório de contabilidade). Teste de regressão em
-  `tests/test_pipeline.py` documenta o bug.
+- **Inert ICP filter (`ilike '%ti%'`).** The pattern matched
+  "A-**TI**-vidades", present in a large share of Brazilian sector
+  descriptions, plus "cosmé**ti**cos" and "Par**ti**cipação". In practice the
+  sector filter did not filter: the ICP was "any company in Varginha".
+  → Matching is now by **CNAE code**, with primary, secondary and **excluded**
+  lists (an accounting firm should not prospect another accounting firm). A
+  regression test in `tests/test_pipeline.py` documents the bug.
 
-- **Tabela `empresas` ausente — digest sem nome de empresa.** O produto
-  identificava a oportunidade apenas por `CNPJ 11111111000199`, inacionável
-  para o usuário final. Também impedia os fatores de score `porte` e
-  `capital`.
-  → `slv_empresas` adicionado, trazendo razão social, capital social e porte.
-  `nome_fantasia` (coluna 04), antes descartado, também passa a ser ingerido.
+- **`empresas` table missing — digest without company names.** The product
+  identified opportunities only as `CNPJ 11111111000199`, unusable for the end
+  user. It also blocked the `porte` and `capital` score factors.
+  → `slv_empresas` added, bringing legal name, share capital and size.
+  `nome_fantasia` (column 04), previously discarded, is now ingested too.
 
-- **Score com apenas 3 valores possíveis.** A fórmula era base fixa 50 +
-  recência (35/15/0), resultando em 50, 65 ou 85 — sem discriminar dentro da
-  mesma faixa. A "base ICP +50" era constante para todos os aprovados, logo
-  não pontuava nada. `where opportunity_score >= 50` era logicamente inerte.
-  → Seis fatores ponderados (recência com decaimento linear, aderência de
-  CNAE, porte, localização, capital social, completude de contato), com pesos
-  vindos do ICP. Distribuição verificada: 16 valores distintos no conjunto de
-  teste.
+- **Score with only 3 possible values.** The formula was a fixed base of 50
+  plus recency (35/15/0), yielding 50, 65 or 85 — with no discrimination
+  inside a band. The "+50 ICP base" was constant for everyone who passed, so
+  it scored nothing. `where opportunity_score >= 50` was logically inert.
+  → Six weighted factors (recency with linear decay, CNAE fit, size,
+  location, share capital, contact completeness), with weights from the ICP.
+  Verified distribution: 16 distinct values on the test set.
 
-- **Score não auditável.** A explicação era uma string concatenada, sem os
-  valores por trás.
-  → `score_fatores` persistido como JSON estruturado; o texto exibido é
-  derivado dele. Teste de dados garante que a soma dos fatores é exatamente
-  igual ao score exibido.
+- **Score not auditable.** The explanation was a concatenated string with no
+  underlying values.
+  → `score_fatores` persisted as structured JSON; the displayed text is
+  derived from it. A data test guarantees the factors sum exactly to the
+  displayed score.
 
-- **ICP hardcoded em SQL.** `municipio_nome = 'VARGINHA'` cravado no model —
-  cada cliente novo exigiria editar SQL.
-  → ICP em `config/icp/*.yaml`, carregado para tabelas de configuração por
-  `scripts/carregar_icp.py`. Novo cliente = novo arquivo YAML.
+- **ICP hardcoded in SQL.** `municipio_nome = 'VARGINHA'` embedded in the
+  model — every new client would require editing SQL.
+  → ICP lives in `config/icp/*.yaml`, loaded into configuration tables by
+  `scripts/carregar_icp.py`. New client = new YAML file.
 
-- **Projeto não reproduzível.** Não havia `requirements.txt`, `pyproject.toml`
-  nem `environment.yml` — impossível clonar e executar.
-  → `pyproject.toml` com dependências, extras (`ia`, `dev`) e configuração de
-  `ruff`/`pytest`.
+- **Project not reproducible.** No `requirements.txt`, `pyproject.toml` or
+  `environment.yml` — impossible to clone and run.
+  → `pyproject.toml` with dependencies, extras (`ia`, `dev`) and
+  `ruff`/`pytest` configuration.
 
-- **`.gitignore.txt`** — a extensão `.txt` fazia o Git ignorar o próprio
-  arquivo de ignore. → Renomeado para `.gitignore`.
+- **`.gitignore.txt`** — the `.txt` extension made Git ignore the ignore file
+  itself. → Renamed to `.gitignore`.
 
-- **CI quebrado por construção.** O workflow era o template padrão do GitHub:
-  usava conda, referenciava um `environment.yml` inexistente e rodava
-  `pytest` sem testes — falhava em todo push.
-  → Substituído por `ci.yml` (lint + testes + **pipeline end-to-end com
-  fixtures sintéticas**) e `pipeline-mensal.yml` (execução agendada).
+- **CI broken by construction.** The workflow was GitHub's default template:
+  conda-based, referencing a non-existent `environment.yml`, running `pytest`
+  with no tests — failing on every push.
+  → Replaced by `ci.yml` (lint + tests + **end-to-end pipeline on synthetic
+  fixtures**) and `pipeline-mensal.yml` (scheduled run).
 
-### Corrigido — MÉDIO
+### Fixed — MEDIUM
 
-- **`verify=False` em todos os downloads**, desabilitando verificação TLS.
-  → Verificação ativada por padrão; desligamento apenas explícito via
+- **`verify=False` on every download**, disabling TLS verification.
+  → Verification on by default; disabling requires an explicit
   `RADAR_TLS_INSECURE=1`.
 
-- **SDK e modelo defasados.** `google.generativeai` (legado) com
-  `gemini-1.5-flash` (aposentado) — a chamada real provavelmente já falhava,
-  e falhava silenciosamente virando texto fabricado.
-  → Migrado para `google-genai`, modelo configurável via `RADAR_LLM_MODEL`
+- **Outdated SDK and model.** `google.generativeai` (legacy) with
+  `gemini-1.5-flash` (retired) — the real call was probably already failing,
+  and failing silently into fabricated text.
+  → Migrated to `google-genai`, model configurable via `RADAR_LLM_MODEL`
   (default `gemini-2.0-flash`).
 
-- **Enriquecimento sem cache.** Cada execução fazia `DROP TABLE` e
-  reprocessava tudo, re-gastando tokens — contrariando "pré-computado, nunca
-  re-pagar pela mesma empresa".
-  → Tabela persistente com `event_id` como chave; apenas oportunidades
-  inéditas são enviadas ao modelo.
+- **Enrichment without cache.** Every run did `DROP TABLE` and reprocessed
+  everything, re-spending tokens — contradicting "precomputed, never pay twice
+  for the same company".
+  → Persistent table keyed by `event_id`; only previously unseen
+  opportunities are sent to the model.
 
-- **Prompt sem grounding.** Não proibia invenção, não recebia o ICP nem o
-  score/fatores, e pedia `dor_provavel` como se fosse fato apurado.
-  → `system_instruction` com regras explícitas; ICP, score e fatores passam a
-  compor o contexto; o campo foi renomeado para `hipotese_de_dor` e é
-  apresentado como hipótese setorial, não como fato sobre a empresa.
+- **Prompt without grounding.** It did not forbid invention, did not receive
+  the ICP or the score/factors, and asked for `dor_provavel` as though it were
+  established fact.
+  → `system_instruction` with explicit rules; ICP, score and factors now form
+  the context; the field was renamed `hipotese_de_dor` and is presented as a
+  sector-level hypothesis, not a fact about the company.
 
-- **Schemas inconsistentes.** O dbt gravava tudo em `main` (o `profiles.yml`
-  não definia schema) enquanto o script Python gravava em `gold`; as pastas
-  `silver/`/`gold/` eram puramente cosméticas.
-  → Schemas configurados por camada em `dbt_project.yml`.
+- **Inconsistent schemas.** dbt wrote everything to `main` (the `profiles.yml`
+  defined no schema) while the Python script wrote to `gold`; the
+  `silver/`/`gold/` folders were purely cosmetic.
+  → Schemas configured per layer in `dbt_project.yml`.
 
-- **Zero testes de dados.** `tests/` vazio, nenhum `schema.yml`.
-  → 24 testes dbt (`unique`, `not_null`, `accepted_values`) mais 5 testes
-  singulares, incluindo o teste central do Event Store: nenhum evento
-  `NEW_COMPANY` pode referenciar CNPJ já existente na competência anterior.
+- **Zero data tests.** `tests/` empty, no `schema.yml`.
+  → 24 dbt tests (`unique`, `not_null`, `accepted_values`) plus 5 singular
+  tests, including the Event Store's central check: no `NEW_COMPANY` event may
+  reference a CNPJ already present in the previous vintage.
 
-- **Ausência de observabilidade** (§16 do Plano Diretor).
-  → `src/observabilidade.py` registra em `meta.run_log` etapa, competência,
-  status, contagens, chamadas ao LLM, duração e falhas.
+- **No observability** (master plan §16).
+  → `src/observabilidade.py` logs stage, vintage, status, counts, LLM calls,
+  duration and failures to `meta.run_log`.
 
-- **Ausência de ciclo de feedback** (§13).
-  → Tabela `gold.opportunity_feedback` e campos de marcação em cada
-  oportunidade do digest.
+- **No feedback loop** (§13).
+  → `gold.opportunity_feedback` table and marking fields on every digest
+  opportunity.
 
-- **`extrair_csv` assumia um único arquivo por ZIP** (`namelist()[0]`).
-  → Extrai todos os membros.
+- **`extrair_csv` assumed a single file per ZIP** (`namelist()[0]`).
+  → Extracts all members.
 
-- **Download sem verificação de integridade.** Bastava o arquivo existir; um
-  ZIP truncado passava como válido.
-  → `_zip_integro()` valida via `testzip()`; arquivos corrompidos são
-  rebaixados. Coberto por testes.
+- **Download without integrity check.** Existence was enough; a truncated ZIP
+  passed as valid.
+  → `_zip_integro()` validates via `testzip()`; corrupted files are
+  re-downloaded. Covered by tests.
 
-- **Orquestrador frágil.** Usava `python` literal e `shell=True`, quebrando
-  fora do venv ativo; não recebia competência; não rodava testes.
-  → `sys.executable` com lista de argumentos; competência parametrizada e
-  propagada ao dbt via `--vars`; usa `dbt build` (models + testes), de modo
-  que dado ruim interrompe o pipeline antes de virar digest.
+- **Fragile orchestrator.** It used a literal `python` with `shell=True`,
+  breaking outside the active venv; it took no vintage; it ran no tests.
+  → `sys.executable` with an argument list; vintage parameterized and
+  propagated to dbt via `--vars`; uses `dbt build` (models + tests), so bad
+  data stops the pipeline before it becomes a digest.
 
-- **README desatualizado**, descrevendo a V1 e um roadmap terminando em BI.
-  → Reescrito para a V2.
+- **Outdated README**, describing V1 and a roadmap ending at BI.
+  → Rewritten for V2.
 
-### Adicionado
+### Added
 
-- `scripts/gerar_fixtures.py` — gera dados sintéticos no formato exato da
-  Receita (30 colunas, `latin-1`, `;`), em duas competências, permitindo
-  desenvolver e testar o pipeline sem depender do download de ~85 GB nem da
-  instabilidade dos espelhos oficiais. Usado também pelo CI.
-- `src/config.py` — layout oficial e caminhos centralizados. Uma mudança de
-  layout da Receita passa a ser alteração de uma linha, não uma caçada por
-  índices espalhados no SQL.
-- `src/observabilidade.py` — run log estruturado.
-- `dbt_radar/models/bronze/` — camada Bronze explícita lendo os Parquet
-  particionados via `hive_partitioning`.
-- `slv_dominios` — CNAEs e municípios deduplicados pela competência mais
-  recente.
-- Priorização por faixas (alta/média/baixa) no digest, conforme §12 do Plano
-  Diretor.
-- Campo `confidence` no Event Store: distingue abertura recente de inclusão
-  retroativa/correção cadastral.
+- `scripts/gerar_fixtures.py` — generates synthetic data in the tax
+  authority's exact format (30 columns, `latin-1`, `;`), across two vintages,
+  allowing the pipeline to be developed and tested without the ~85 GB download
+  or the instability of the official mirrors. Also used by CI.
+- `src/config.py` — official layout and paths centralized. A layout change at
+  the source becomes a one-line edit rather than a hunt for indices scattered
+  through SQL.
+- `src/observabilidade.py` — structured run log.
+- `dbt_radar/models/bronze/` — explicit Bronze layer reading the partitioned
+  Parquet via `hive_partitioning`.
+- `slv_dominios` — CNAEs and municipalities deduplicated by most recent
+  vintage.
+- Priority bands (high/medium/low) in the digest, per master plan §12.
+- `confidence` field in the Event Store: distinguishes a recent opening from a
+  retroactive entry or registry correction.
 
-### Verificação
+### Verification
 
-Pipeline executado de ponta a ponta com duas competências sintéticas
-(400 e 460 estabelecimentos, 60 empresas exclusivas da competência mais
-recente):
+Pipeline executed end to end with two synthetic vintages (400 and 460
+establishments, 60 companies exclusive to the newer vintage):
 
-| Verificação | Resultado |
+| Check | Result |
 |---|---|
-| Set difference | 58 eventos detectados (60 novas − 2 inativas, corretamente filtradas por `situacao_cadastral`) |
-| Testes dbt | 34 passando, 0 erros |
-| Testes pytest | 14 passando |
-| Lint (ruff) | limpo |
-| Idempotência | duas execuções completas → `event_id` idênticos |
-| Cache de enriquecimento | segunda execução: 0 chamadas ao LLM |
-| Distribuição de score | 16 valores distintos (antes: 3) |
+| Set difference | 58 events detected (60 new − 2 inactive, correctly filtered by `situacao_cadastral`) |
+| dbt tests | 34 passing, 0 errors |
+| pytest | 14 passing |
+| Lint (ruff) | clean |
+| Idempotence | two full runs → identical `event_id` values |
+| Enrichment cache | second run: 0 LLM calls |
+| Score distribution | 16 distinct values (previously 3) |
 
-### Pendências conhecidas
+### Known limitations
 
-- O pipeline **ainda não foi executado com dados reais da Receita** — os
-  espelhos oficiais não responderam durante a refatoração. A ingestão está
-  pronta e parametrizada; falta a primeira carga real.
-- Catálogo de eventos permanece com `NEW_COMPANY` apenas, por decisão de
-  escopo. A fundação (competência + Parquet particionado) já suporta os
-  demais.
-- Snapshots SCD-2 não implementados: só serão necessários para eventos de
-  mudança de atributo.
-- Pesos do score são hipóteses iniciais, a calibrar com dados reais de
-  conversão.
-- Envio de e-mail permanece manual (concierge), conforme o MVP.
+- The pipeline **had not yet run with real data** — the official mirrors did
+  not respond during the refactor. Ingestion is ready and parameterized; the
+  first real load is pending.
+- The event catalogue remains `NEW_COMPANY` only, by scope decision. The
+  foundation (vintage + partitioned Parquet) already supports the rest.
+- SCD-2 snapshots not implemented: only needed for attribute-change events.
+- Score weights are initial hypotheses, to be calibrated with real conversion
+  data.
+- E-mail delivery remains manual (concierge), per the MVP.
 
 ---
 
 ## [1.0.0] — 2026-08-25
 
-- Versão inicial: ingestão de `Estabelecimentos0`, models dbt
+- Initial version: ingestion of `Estabelecimentos0`, dbt models
   (`slv_estabelecimentos`, `evt_new_company`, `gld_icp_matches`,
-  `gld_opportunities`), enriquecimento via Gemini e geração de digest em
-  Markdown. Encadeamento ponta a ponta funcionando com dados de exemplo.
+  `gld_opportunities`), Gemini enrichment and Markdown digest generation. End
+  to end chain working on sample data.
