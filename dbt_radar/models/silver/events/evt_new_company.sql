@@ -77,7 +77,8 @@ select
     */
     case
         when data_inicio_atividade is null then 'baixa'
-        when data_inicio_atividade >= current_date - interval 120 day then 'alta'
+        when data_inicio_atividade >= {{ data_referencia() }} - interval 120 day
+            then 'alta'
         else 'media'
     end                                             as confidence,
 

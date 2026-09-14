@@ -16,3 +16,8 @@ data/
 target/
 dbt_packages/
 logs/
+# Bancos de dados e dados brutos
+*.duckdb
+*.duckdb.wal
+data/
+.env

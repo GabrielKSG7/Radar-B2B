@@ -51,7 +51,13 @@ avaliado as (
         coalesce(c.prioridade, 'nenhum')                as cnae_prioridade,
         (e.municipio_nome in (select municipio from municipios_alvo)) as match_municipio,
         (e.porte in (select porte from portes_alvo))    as match_porte,
-        date_diff('day', e.event_date, current_date)    as dias_desde_evento
+
+        -- Recência medida contra o fim da COMPETÊNCIA, não contra a data de
+        -- execução. Com current_date, reprocessar 2024-08 em 2026 dava ~770
+        -- dias e o filtro de recência do ICP (45 dias) zerava o Gold —
+        -- silenciosamente, porque tabela vazia não é erro.
+        date_diff('day', e.event_date, {{ data_referencia() }})
+                                                        as dias_desde_evento
 
     from eventos e
     cross join icp i
