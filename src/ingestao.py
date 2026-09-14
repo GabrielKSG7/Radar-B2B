@@ -218,7 +218,8 @@ def _contar_linhas_cruas(con, csvs: list[Path]) -> int:
 
 def _carregar_parquet(con, tabela: str, csvs: list[Path], layout: dict[str, int],
                       n_colunas: int, competencia: str, uf: str | None,
-                      fatia: int | None = None, limpar: bool = True) -> tuple[int, int]:
+                      fatia: int | None = None, limpar: bool = True,
+                      filtro_extra: str | None = None) -> tuple[int, int]:
     """Lê os CSVs crus e grava (parte d)a partição Parquet da competência.
 
     `fatia` grava um arquivo próprio dentro da partição (`dados_3.parquet`),
@@ -240,9 +241,12 @@ def _carregar_parquet(con, tabela: str, csvs: list[Path], layout: dict[str, int]
     destino = saida / (f"dados_{fatia}.parquet" if fatia is not None else "dados.parquet")
 
     lista = ", ".join(f"'{p.as_posix()}'" for p in csvs)
-    filtro_uf = ""
+    condicoes = []
     if uf and "uf" in layout:
-        filtro_uf = f"WHERE column{layout['uf']:02d} = '{uf}'"
+        condicoes.append(f"column{layout['uf']:02d} = '{uf}'")
+    if filtro_extra:
+        condicoes.append(filtro_extra)
+    filtro_uf = ("WHERE " + " AND ".join(condicoes)) if condicoes else ""
 
     # Os arquivos da Receita são latin-1, delimitados por ';' e com os campos
     # entre aspas duplas (cartilha §2.1, "pegadinhas da fonte"). Declarar
@@ -390,51 +394,74 @@ def ingerir(competencia: str, uf: str | None = None,
     # Carregar as 10 fatias de uma vez exigiria manter ~45 GB de CSV extraído
     # por competência no disco; assim o pico fica em poucos GB. Os ZIPs ficam,
     # porque são o cache que evita rebaixar tudo (o [SKIP] depende deles).
-    tabelas = (
-        ("estabelecimentos", "Estabelecimentos",
-         LAYOUT_ESTABELECIMENTOS, N_COLUNAS_ESTABELECIMENTOS, uf),
-        ("empresas", "Empresas",
-         LAYOUT_EMPRESAS, N_COLUNAS_EMPRESAS, None),
-    )
+    def _processar(tabela, prefixo, layout, n_col, filtro_uf, filtro_extra):
+        """Baixa, extrai, carrega e descarta o CSV de cada fatia da tabela."""
+        for posicao, i in enumerate(fatias):
+            nome_zip = f"{prefixo}{i}.zip"
+            if somente_local:
+                caminho_zip = raw / nome_zip
+                if not caminho_zip.exists():
+                    print(f"  [PULA] {nome_zip} ausente (modo offline).")
+                    continue
+            else:
+                caminho_zip = baixar_arquivo(nome_zip, competencia, raw)
+
+            csvs_fatia = extrair(caminho_zip, raw / "csv")
+            try:
+                ins, rej = _carregar_parquet(
+                    con, tabela, csvs_fatia, layout, n_col, competencia,
+                    filtro_uf, fatia=i, limpar=(posicao == 0),
+                    filtro_extra=filtro_extra)
+                contagens[tabela] = contagens.get(tabela, 0) + ins
+                rejeitadas[tabela] += rej
+                print(f"    fatia {i} · {tabela:18s} {ins:>12,} linhas"
+                      + (f"  ({rej:,} rejeitada(s))" if rej else ""))
+
+                # Tolerar linha ruim é aceitável; tolerar arquivo ruim não
+                # é. O denominador tem de ser o total de linhas do ARQUIVO:
+                # com --uf MG, "carregadas" conta só Minas enquanto as
+                # rejeições vêm do país inteiro. Só pagamos essa contagem
+                # quando houve rejeição — e aqui, enquanto o CSV existe.
+                if rej:
+                    total = _contar_linhas_cruas(con, csvs_fatia)
+                    if total and rej / total > LIMIAR_REJEICAO:
+                        raise RuntimeError(
+                            f"{tabela} (fatia {i}): {rej:,} de {total:,} "
+                            f"linhas rejeitadas (>{LIMIAR_REJEICAO:.1%}). O "
+                            f"layout da Receita pode ter mudado — confira o "
+                            f"dicionário em {RFB_DICIONARIO_LAYOUT}")
+            finally:
+                for c in csvs_fatia:
+                    c.unlink(missing_ok=True)
 
     try:
-        for posicao, i in enumerate(fatias):
-            for tabela, prefixo, layout, n_col, filtro in tabelas:
-                nome_zip = f"{prefixo}{i}.zip"
-                if somente_local:
-                    caminho_zip = raw / nome_zip
-                    if not caminho_zip.exists():
-                        print(f"  [PULA] {nome_zip} ausente (modo offline).")
-                        continue
-                else:
-                    caminho_zip = baixar_arquivo(nome_zip, competencia, raw)
+        # Estabelecimentos primeiro, porque é ele quem define o recorte de UF.
+        _processar("estabelecimentos", "Estabelecimentos",
+                   LAYOUT_ESTABELECIMENTOS, N_COLUNAS_ESTABELECIMENTOS,
+                   uf, None)
 
-                csvs_fatia = extrair(caminho_zip, raw / "csv")
-                try:
-                    ins, rej = _carregar_parquet(
-                        con, tabela, csvs_fatia, layout, n_col, competencia,
-                        filtro, fatia=i, limpar=(posicao == 0))
-                    contagens[tabela] = contagens.get(tabela, 0) + ins
-                    rejeitadas[tabela] += rej
-                    print(f"    fatia {i} · {tabela:18s} {ins:>12,} linhas"
-                          + (f"  ({rej:,} rejeitada(s))" if rej else ""))
+        # EMPRESAS não tem coluna de UF, então sem filtro ela traria o país
+        # inteiro (~180 milhões de linhas por competência) para servir a ~2
+        # milhões de estabelecimentos de MG. Como ela só é usada em join por
+        # cnpj_basico com os estabelecimentos já filtrados, restringimos ao
+        # conjunto que sobreviveu ao recorte — duas ordens de grandeza a
+        # menos em disco e no tempo do slv_empresas.
+        #
+        # O filtro usa TODAS as fatias de estabelecimentos já gravadas, não a
+        # fatia correspondente: não há garantia de que Empresas{i} e
+        # Estabelecimentos{i} cubram os mesmos CNPJs. Por isso as duas
+        # passadas são sequenciais, e não intercaladas.
+        filtro_empresas = None
+        if uf:
+            parquets = (BRONZE_DIR / "estabelecimentos"
+                        / f"competencia={competencia}" / "*.parquet")
+            filtro_empresas = (
+                f"column00 IN (SELECT DISTINCT cnpj_basico FROM "
+                f"read_parquet('{parquets.as_posix()}'))")
+            print(f"    (empresas restritas aos CNPJs de {uf})")
 
-                    # Tolerar linha ruim é aceitável; tolerar arquivo ruim não
-                    # é. O denominador tem de ser o total de linhas do ARQUIVO:
-                    # com --uf MG, "carregadas" conta só Minas enquanto as
-                    # rejeições vêm do país inteiro. Só pagamos essa contagem
-                    # quando houve rejeição — e aqui, enquanto o CSV existe.
-                    if rej:
-                        total = _contar_linhas_cruas(con, csvs_fatia)
-                        if total and rej / total > LIMIAR_REJEICAO:
-                            raise RuntimeError(
-                                f"{tabela} (fatia {i}): {rej:,} de {total:,} "
-                                f"linhas rejeitadas (>{LIMIAR_REJEICAO:.1%}). O "
-                                f"layout da Receita pode ter mudado — confira o "
-                                f"dicionário em {RFB_DICIONARIO_LAYOUT}")
-                finally:
-                    for c in csvs_fatia:
-                        c.unlink(missing_ok=True)
+        _processar("empresas", "Empresas",
+                   LAYOUT_EMPRESAS, N_COLUNAS_EMPRESAS, None, filtro_empresas)
     finally:
         con.close()
 

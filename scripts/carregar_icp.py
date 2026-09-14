@@ -52,6 +52,19 @@ CREATE OR REPLACE TABLE config.icp_porte (
     icp_nome    VARCHAR,
     porte       VARCHAR
 );
+
+-- geografia.uf e eventos existiam no YAML mas nunca eram lidos: quem
+-- configurasse um ICP novo suporia que funcionavam (o PD §9 lista os dois
+-- como atributos do ICP) e teria filtro nenhum. Ver REVISAO_PD_V2.md §3.3.
+CREATE OR REPLACE TABLE config.icp_uf (
+    icp_nome    VARCHAR,
+    uf          VARCHAR
+);
+
+CREATE OR REPLACE TABLE config.icp_evento (
+    icp_nome    VARCHAR,
+    event_type  VARCHAR
+);
 """
 
 
@@ -90,6 +103,16 @@ def carregar() -> None:
         for porte in icp.get("porte", {}).get("alvo", []) or []:
             con.execute("INSERT INTO config.icp_porte VALUES (?,?)",
                         [nome, str(porte).zfill(2)])
+
+        for uf in icp.get("geografia", {}).get("uf", []) or []:
+            con.execute("INSERT INTO config.icp_uf VALUES (?,?)",
+                        [nome, str(uf).upper()])
+
+        # Lista vazia = ICP aceita qualquer evento. O casamento no Gold trata
+        # ausência como "sem restrição", não como "nada passa".
+        for evento in icp.get("eventos", []) or []:
+            con.execute("INSERT INTO config.icp_evento VALUES (?,?)",
+                        [nome, str(evento).upper()])
 
         print(f"  [OK] ICP '{nome}' carregado de {caminho.name}")
 

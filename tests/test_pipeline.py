@@ -536,7 +536,7 @@ def test_orquestrador_passa_as_mesmas_competencias_para_ingestao_e_dbt(monkeypat
     comandos: list[str] = []
     monkeypatch.setattr(rp, "run_step",
                         lambda nome, cmd, cwd=None: comandos.append(cmd))
-    rp.main()
+    rp.main([])   # argv explícito: sem isso o argparse leria os args do pytest
 
     ingeridas = set(re.findall(r"--competencia\s+(\S+)", " ".join(comandos)))
     assert len(ingeridas) == 2, f"esperava duas competências, achei {ingeridas}"
@@ -561,7 +561,7 @@ def test_orquestrador_usa_fatias_identicas_nas_competencias(monkeypatch):
     comandos: list[str] = []
     monkeypatch.setattr(rp, "run_step",
                         lambda nome, cmd, cwd=None: comandos.append(cmd))
-    rp.main()
+    rp.main([])   # argv explícito: sem isso o argparse leria os args do pytest
 
     fatias = set(re.findall(r"--fatias\s+(\S+)", " ".join(comandos)))
     assert len(fatias) == 1, (
@@ -577,7 +577,7 @@ def test_dbt_roda_build_para_executar_os_testes_de_dados(monkeypatch):
     comandos: list[str] = []
     monkeypatch.setattr(rp, "run_step",
                         lambda nome, cmd, cwd=None: comandos.append(cmd))
-    rp.main()
+    rp.main([])   # argv explícito: sem isso o argparse leria os args do pytest
 
     dbt = [c for c in comandos if c.strip().startswith("dbt")]
     assert any("dbt build" in c for c in dbt), (
@@ -631,3 +631,108 @@ def test_limpar_falso_preserva_fatias_ja_gravadas(bronze):
     ing._carregar_parquet(con, "estabelecimentos", [csv], _LAYOUT_MIN,
                           _COLS_ESTAB, "2026-08", None, fatia=2, limpar=True)
     assert [p.name for p in pasta.glob("*.parquet")] == ["dados_2.parquet"]
+
+
+# ------------------------------------------------------ CLI do orquestrador
+def test_cli_honra_a_linha_exata_do_ci():
+    """Regressão do CI que baixava a Receita inteira (REVISAO_PD_V2 §3.1).
+
+    `run_pipeline.py` não lia sys.argv. Como Python não reclama de argumento
+    que ninguém consome, o ci.yml pedia --somente-local e o pipeline saía
+    baixando as 10 fatias reais a cada push.
+    """
+    import importlib
+    import re
+
+    rp = importlib.import_module("run_pipeline")
+    comandos: list[str] = []
+    original = rp.run_step
+    rp.run_step = lambda nome, cmd, cwd=None: comandos.append(cmd)
+    try:
+        rp.main(["--competencia", "2026-08", "--anterior", "2026-07",
+                 "--somente-local", "--sem-ia"])
+    finally:
+        rp.run_step = original
+
+    ingestoes = [c for c in comandos if "src.ingestao" in c]
+    assert all("--somente-local" in c for c in ingestoes), (
+        "--somente-local ignorado: o CI tentaria baixar da Receita")
+    assert any("--sem-ia" in c for c in comandos), "--sem-ia ignorado"
+
+    dbt = next(c for c in comandos if c.strip().startswith("dbt"))
+    assert set(re.findall(r"competencia_\w+:\s*'([^']+)'", dbt)) == {"2026-08", "2026-07"}
+    assert set(re.findall(r"--competencia\s+(\S+)", " ".join(ingestoes))) == \
+        {"2026-08", "2026-07"}
+
+
+def test_cli_passa_icp_para_o_dbt():
+    """--icp precisa virar a var icp_ativo; senão o dbt usa sempre o default."""
+    import importlib
+
+    rp = importlib.import_module("run_pipeline")
+    comandos: list[str] = []
+    original = rp.run_step
+    rp.run_step = lambda nome, cmd, cwd=None: comandos.append(cmd)
+    try:
+        rp.main(["--icp", "outro_cliente"])
+    finally:
+        rp.run_step = original
+
+    dbt = next(c for c in comandos if c.strip().startswith("dbt"))
+    assert "icp_ativo: 'outro_cliente'" in dbt
+
+
+def test_cli_sem_argumentos_mantem_o_comportamento_anterior():
+    """Os defaults são as constantes: rodar sem args não muda nada."""
+    import importlib
+
+    rp = importlib.import_module("run_pipeline")
+    args = rp.parse_args([])
+    assert args.competencia == rp.COMPETENCIA_ATUAL
+    assert args.anterior == rp.COMPETENCIA_ANTERIOR
+    assert args.fatias == rp.FATIAS
+    assert args.uf == rp.UF
+    assert args.somente_local is False and args.sem_ia is False
+
+
+# --------------------------------------------------------------- ICP no YAML
+def test_icp_carrega_uf_e_eventos_do_yaml(tmp_path, monkeypatch):
+    """geografia.uf e eventos existiam no YAML e não eram lidos (§3.3)."""
+    import importlib
+
+    icp_dir = tmp_path / "icp"
+    icp_dir.mkdir()
+    (icp_dir / "teste.yaml").write_text(
+        "nome: teste\n"
+        "oferta: x\n"
+        "geografia:\n  uf: [mg, sp]\n  municipios: [VARGINHA]\n"
+        "eventos: [new_company]\n"
+        "cnae:\n  primarios: ['5611201']\n"
+        "porte:\n  alvo: ['01']\n",
+        encoding="utf-8")
+
+    carregar_icp = importlib.import_module("scripts.carregar_icp")
+    monkeypatch.setattr(carregar_icp, "ICP_DIR", icp_dir)
+    monkeypatch.setattr(carregar_icp, "DB_PATH", tmp_path / "t.duckdb")
+    carregar_icp.carregar()
+
+    con = duckdb.connect(str(tmp_path / "t.duckdb"), read_only=True)
+    assert con.execute("SELECT uf FROM config.icp_uf ORDER BY uf").fetchall() \
+        == [("MG",), ("SP",)], "geografia.uf não foi carregada"
+    assert con.execute("SELECT event_type FROM config.icp_evento").fetchall() \
+        == [("NEW_COMPANY",)], "eventos não foi carregado"
+
+
+# -------------------------------------------------- filtro extra na carga
+def test_filtro_extra_restringe_alem_da_uf(bronze):
+    """Usado para limitar `empresas` aos CNPJs do recorte de UF (§3.6)."""
+    csv = bronze / "estab.csv"
+    csv.write_bytes("\n".join([
+        _linha_estab("ALFA"), _linha_estab("BETA"),
+    ]).encode("utf-8"))
+
+    ins, _ = ing._carregar_parquet(
+        duckdb.connect(), "estabelecimentos", [csv], _LAYOUT_MIN,
+        _COLS_ESTAB, "2026-08", "MG",
+        filtro_extra="column04 = 'ALFA'")
+    assert ins == 1, "filtro_extra não foi aplicado junto com o de UF"

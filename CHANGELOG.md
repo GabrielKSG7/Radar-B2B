@@ -4,6 +4,80 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.2.0] — 2026-09-14
+
+Etapa 1 da revisão contra o Plano Diretor V2 (ver `REVISAO_PD_V2.md`). Três
+correções que precisavam vir **antes** da carga completa das 10 fatias, porque
+duas delas mudam o que a carga grava.
+
+### Corrigido — CRÍTICO
+
+- **O orquestrador não lia `sys.argv`.** `run_pipeline.py` fixava tudo em
+  constantes, enquanto o README documentava uma CLI e os dois workflows do
+  GitHub Actions a usavam. Python não reclama de argumento que ninguém
+  consome, então as opções eram **silenciosamente descartadas**.
+
+  Medido executando o `main()` com a linha exata do `ci.yml`
+  (`--competencia 2026-08 --anterior 2026-07 --somente-local --sem-ia`): o
+  pipeline ignorava as quatro e executava 2024-07/2024-08 com as 10 fatias
+  reais. Ou seja, **todo push para `main` disparava uma tentativa de download
+  de dezenas de GB** da Receita, e as fixtures — única proteção real contra
+  regressão de parsing — nunca eram exercitadas. A automação mensal tinha o
+  mesmo defeito: descartava o `--competencia` do `workflow_dispatch` e
+  reprocessaria 2024-08 indefinidamente.
+  → `argparse` com `--competencia`, `--anterior`, `--uf`, `--fatias`,
+  `--icp`, `--somente-local` e `--sem-ia`, tendo as constantes atuais como
+  default: rodar sem argumentos mantém exatamente o comportamento anterior.
+  `--icp` passou a alimentar a var `icp_ativo` do dbt, que antes era sempre a
+  do `dbt_project.yml`.
+
+### Corrigido — ALTO
+
+- **Chaves do ICP silenciosamente ignoradas.** `geografia.uf` e `eventos`
+  estavam no YAML e o `carregar_icp.py` nunca os lia — o PD §9 lista os dois
+  como atributos do ICP. Restringir por UF na configuração não tinha efeito
+  algum.
+  → Novas tabelas `config.icp_uf` e `config.icp_evento`, declaradas em
+  `sources.yml` e aplicadas em `gld_icp_matches`. Lista vazia significa "sem
+  restrição", nunca "nada passa".
+
+### Alterado — otimização
+
+- **`empresas` restrita ao recorte de UF.** A tabela não tem coluna de UF, e
+  sem filtro o Bronze guardaria **~180 milhões de linhas por competência**
+  para servir a ~2 milhões de estabelecimentos de MG. Como ela só é usada em
+  join por `cnpj_basico` com os estabelecimentos já filtrados, passa a ser
+  restrita ao conjunto que sobreviveu ao recorte.
+  → A ingestão virou **duas passadas sequenciais** (todos os estabelecimentos,
+  depois todas as empresas) em vez de intercalar as tabelas fatia a fatia: não
+  há garantia de que `Empresas{i}` e `Estabelecimentos{i}` cubram os mesmos
+  CNPJs, então o filtro usa todas as fatias de estabelecimentos já gravadas.
+  → `_carregar_parquet` ganhou `filtro_extra`, combinado com o filtro de UF.
+
+### Adicionado
+
+- 5 testes, todos verificados contra a versão anterior: a linha exata do
+  `ci.yml` sendo honrada, `--icp` chegando ao dbt, defaults preservando o
+  comportamento sem argumentos, `uf`/`eventos` carregados do YAML e
+  `filtro_extra` somando ao filtro de UF.
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| Testes pytest | 45 passando (antes: 40) |
+| Os 3 testes de CLI/ICP contra a versão anterior | falham, como esperado |
+| Lint (ruff) | limpo |
+| Ingestão de 3 fatias com `--uf MG` | empresas 350 → 287 (só CNPJs de MG) |
+
+### Pendente da revisão
+
+Itens 4, 6 e 7 do §5 da `REVISAO_PD_V2.md`: eventos/oportunidades e custo de
+LLM no `run_log`, campos de grounding e remoção do workflow órfão
+`python-package-conda.yml`. Nenhum bloqueia a carga completa.
+
+---
+
 ## [2.1.7] — 2026-09-14
 
 Com as correções da 2.1.6 o pipeline passou a produzir eventos: 580.729 em

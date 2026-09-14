@@ -22,3 +22,5 @@ sources:
       - name: icp_cnae
       - name: icp_municipio
       - name: icp_porte
+      - name: icp_uf
+      - name: icp_evento

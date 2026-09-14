@@ -1,3 +1,4 @@
+import argparse
 import subprocess
 import sys
 import time
@@ -52,19 +53,53 @@ COMPETENCIA_ANTERIOR = "2024-07"
 COMPETENCIA_ATUAL = "2024-08"
 FATIAS = "0,1,2,3,4,5,6,7,8,9"
 UF = "MG"
+ICP = "contabilidade_sul_mg"
 
 
-def main():
-    print("🌟 INICIANDO PIPELINE RADAR B2B (MODO OFFLINE/CDC TEST) 🌟")
-    print(f"   {COMPETENCIA_ANTERIOR} -> {COMPETENCIA_ATUAL} | fatias {FATIAS} | UF {UF}\n")
+def parse_args(argv=None):
+    """CLI do orquestrador — os defaults são as constantes acima.
+
+    Sem esta função o script ignorava `sys.argv` em silêncio, e como Python
+    não reclama de argumento que ninguém lê, README, ci.yml e
+    pipeline-mensal.yml passavam opções que nunca surtiam efeito: o CI pedia
+    `--somente-local` e o pipeline saía baixando dezenas de GB da Receita a
+    cada push. Ver REVISAO_PD_V2.md §3.1.
+    """
+    ap = argparse.ArgumentParser(
+        description="Orquestrador do pipeline Radar B2B")
+    ap.add_argument("--competencia", default=COMPETENCIA_ATUAL,
+                    help=f"competência atual AAAA-MM (default: {COMPETENCIA_ATUAL})")
+    ap.add_argument("--anterior", default=COMPETENCIA_ANTERIOR,
+                    help=f"competência comparada (default: {COMPETENCIA_ANTERIOR})")
+    ap.add_argument("--uf", default=UF,
+                    help=f"filtra estabelecimentos por UF (default: {UF})")
+    ap.add_argument("--fatias", default=FATIAS,
+                    help="fatias a ingerir, ex: 0,1 (default: todas)")
+    ap.add_argument("--icp", default=ICP,
+                    help=f"ICP ativo (default: {ICP})")
+    ap.add_argument("--somente-local", action="store_true",
+                    help="não baixa; usa os ZIPs já presentes em data/raw")
+    ap.add_argument("--sem-ia", action="store_true",
+                    help="pula o LLM; enriquecimento só por heurística")
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    print("🌟 INICIANDO PIPELINE RADAR B2B 🌟")
+    print(f"   {args.anterior} -> {args.competencia} | fatias {args.fatias} | "
+          f"UF {args.uf} | ICP {args.icp}"
+          + ("  [somente local]" if args.somente_local else "")
+          + ("  [sem IA]" if args.sem_ia else "") + "\n")
     total_start = time.time()
 
     # 1. Ingestão Bronze (O script fará o SKIP automático do que já existir no disco)
-    for rotulo, competencia in (("1A", COMPETENCIA_ANTERIOR), ("1B", COMPETENCIA_ATUAL)):
+    somente_local = " --somente-local" if args.somente_local else ""
+    for rotulo, competencia in (("1A", args.anterior), ("1B", args.competencia)):
         run_step(
             f"{rotulo}. INGESTÃO BRONZE ({competencia})",
             f"python -m src.ingestao --competencia {competencia} "
-            f"--fatias {FATIAS} --uf {UF}",
+            f"--fatias {args.fatias} --uf {args.uf}{somente_local}",
         )
 
     # 2. Configuração: ICP do YAML para as tabelas config.* do DuckDB.
@@ -91,8 +126,9 @@ def main():
     run_step(
         "3. TRANSFORMAÇÃO DBT (SILVER/GOLD)",
         'dbt build --profiles-dir . --vars '
-        f'"{{competencia_atual: \'{COMPETENCIA_ATUAL}\', '
-        f'competencia_anterior: \'{COMPETENCIA_ANTERIOR}\'}}"',
+        f'"{{competencia_atual: \'{args.competencia}\', '
+        f'competencia_anterior: \'{args.anterior}\', '
+        f'icp_ativo: \'{args.icp}\'}}"',
         cwd="dbt_radar",
     )
 
@@ -103,7 +139,9 @@ def main():
     # quando o Python carrega o arquivo como parte do pacote. Rodar o arquivo
     # solto quebra com "attempted relative import with no known parent
     # package". Sem GEMINI_API_KEY o módulo avisa e cai na heurística.
-    run_step("4. ENRIQUECIMENTO IA", "python -m src.enriquecimento")
+    run_step("4. ENRIQUECIMENTO IA",
+             "python -m src.enriquecimento"
+             + (" --sem-ia" if args.sem_ia else ""))
 
     # 5. Geração do Produto Final
     run_step("5. GERAÇÃO DO DIGEST", "python -m src.digest")

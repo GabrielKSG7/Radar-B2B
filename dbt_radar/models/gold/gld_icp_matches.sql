@@ -38,6 +38,18 @@ cnae_cfg as (
     where icp_nome = '{{ var("icp_ativo") }}'
 ),
 
+-- geografia.uf e eventos do YAML, que antes eram decorativos. Lista vazia
+-- significa "sem restrição" — nunca "nada passa" (REVISAO_PD_V2.md §3.3).
+ufs_alvo as (
+    select uf from {{ source('config', 'icp_uf') }}
+    where icp_nome = '{{ var("icp_ativo") }}'
+),
+
+eventos_alvo as (
+    select event_type from {{ source('config', 'icp_evento') }}
+    where icp_nome = '{{ var("icp_ativo") }}'
+),
+
 avaliado as (
     select
         e.*,
@@ -70,8 +82,14 @@ where
     -- 1. Exclusões explícitas do ICP têm precedência sobre tudo
     cnae_prioridade <> 'excluido'
 
-    -- 2. Geografia
+    -- 2. Geografia: UF (se o ICP declarar) e município
+    and (not exists (select 1 from ufs_alvo)
+         or uf in (select uf from ufs_alvo))
     and match_municipio
+
+    -- 2b. Tipo de evento aceito pelo ICP
+    and (not exists (select 1 from eventos_alvo)
+         or event_type in (select event_type from eventos_alvo))
 
     -- 3. Setor: precisa ser alvo primário ou secundário
     and cnae_prioridade in ('primario', 'secundario')
