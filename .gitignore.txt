@@ -4,7 +4,7 @@ __pycache__/
 .uv/
 .env
 
-# Dados e Banco de Dados (NUNCA subir para o repositório)
+# Dados e Banco de Dados (NUNCA subir para o repositório).
 data/
 *.csv
 *.zip
