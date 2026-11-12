@@ -6,6 +6,30 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.2.2] — 2026-11-12
+
+Limpeza encontrada ao revisar o estado atual do projeto.
+
+### Corrigido
+
+- **O modelo de LLM padrão não existe mais.** O `gemini-2.0-flash` foi
+  desligado em 01/06/2026, então o enriquecimento falharia na primeira
+  chamada. O padrão agora é `gemini-3.5-flash` (ainda sobrescrevível por
+  `RADAR_LLM_MODEL`).
+- **O workflow mensal era inerte.** Nunca passava `--anterior`, caindo nos
+  defaults fixos 2024-07/2024-08, e um runner do GitHub não guarda o Bronze
+  entre execuções. O `schedule` está desativado; o disparo manual agora exige
+  `competencia` e `anterior`.
+
+### Alterado
+
+- Removidos do versionamento arquivos commitados antes de o `.gitignore`
+  cobri-los: `logs/dbt.log` (vazava caminho local), `dbt_radar/.user.yml`,
+  `dbt_radar/habilitar VENV.ps1`, `.gitignore.txt`.
+- Versão do `pyproject.toml` alinhada ao changelog (2.2.2).
+
+---
+
 ## [2.2.1] — 2026-09-14
 
 Documentação bilíngue, com o inglês como versão apresentada no portfólio.

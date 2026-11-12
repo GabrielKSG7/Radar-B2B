@@ -6,6 +6,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.2.2] — 2026-11-12
+
+Housekeeping found while reviewing the project's current state.
+
+### Fixed
+
+- **Default LLM model no longer exists.** `gemini-2.0-flash` was shut down on
+  2026-06-01, so enrichment would fail on the first call. Default is now
+  `gemini-3.5-flash` (still overridable via `RADAR_LLM_MODEL`).
+- **Monthly workflow was inert.** It never passed `--anterior`, so it fell
+  back to the hard-coded 2024-07/2024-08 defaults, and a GitHub runner cannot
+  keep Bronze between runs. The `schedule` trigger is disabled; manual
+  dispatch now requires both `competencia` and `anterior`.
+
+### Changed
+
+- Untracked files that were committed before `.gitignore` covered them:
+  `logs/dbt.log` (leaked a local path), `dbt_radar/.user.yml`,
+  `dbt_radar/habilitar VENV.ps1`, `.gitignore.txt`.
+- `pyproject.toml` version aligned with the changelog (2.2.2).
+
+---
+
 ## [2.2.1] — 2026-09-14
 
 Documentation made bilingual, with English as the portfolio-facing version.

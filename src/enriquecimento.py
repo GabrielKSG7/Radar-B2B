@@ -36,7 +36,9 @@ from pydantic import BaseModel, Field, ValidationError
 from . import observabilidade as obs
 from .config import DB_PATH
 
-MODELO = os.environ.get("RADAR_LLM_MODEL", "gemini-2.0-flash")
+# gemini-2.0-flash foi desligado em 01/06/2026; o default acompanha o sucessor
+# recomendado pelo Google. Sobrescreva com RADAR_LLM_MODEL se ele mudar de novo.
+MODELO = os.environ.get("RADAR_LLM_MODEL", "gemini-3.5-flash")
 API_KEY = os.environ.get("GEMINI_API_KEY")
 # Acima desta taxa de falha, algo está sistemicamente errado (chave inválida,
 # modelo removido) e é melhor parar do que entregar um digest degradado.

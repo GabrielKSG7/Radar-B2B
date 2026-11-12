@@ -1,15 +1,24 @@
-# Execução recorrente (Fase 9 — Automação).
-# A Receita publica a base mensalmente; rodamos alguns dias depois.
+# Execução recorrente (Fase 10 — Automação).
+#
+# AGENDAMENTO DESATIVADO ATÉ A PRIMEIRA CARGA REAL VALIDAR O PIPELINE.
+# Motivos: (1) o runner do GitHub não guarda o Bronze entre execuções, então
+# cada mês rebaixaria duas competências inteiras (dezenas de GB) com disco e
+# tempo limitados; (2) sem --competencia/--anterior o pipeline cairia nos
+# defaults fixos do run_pipeline.py. Reative o `schedule` quando a ingestão
+# descobrir sozinha a competência mais recente e a anterior.
 name: Pipeline mensal
 
 on:
-  schedule:
-    - cron: '0 9 5 * *'      # dia 5 de cada mês, 09:00 UTC
+  # schedule:
+  #   - cron: '0 9 5 * *'      # dia 5 de cada mês, 09:00 UTC
   workflow_dispatch:
     inputs:
       competencia:
-        description: 'Competência AAAA-MM (vazio = mês atual)'
-        required: false
+        description: 'Competência atual AAAA-MM'
+        required: true
+      anterior:
+        description: 'Competência anterior AAAA-MM'
+        required: true
 
 jobs:
   executar:
@@ -26,7 +35,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python run_pipeline.py --uf MG \
-            ${{ inputs.competencia && format('--competencia {0}', inputs.competencia) || '' }}
+            --competencia "${{ inputs.competencia }}" \
+            --anterior "${{ inputs.anterior }}"
       - uses: actions/upload-artifact@v4
         with:
           name: digest-mensal
