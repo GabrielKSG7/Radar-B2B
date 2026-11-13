@@ -18,6 +18,16 @@
   previous_value, current_value, confidence, event_metadata.
 */
 
+{#
+  Naturezas jurídicas que NÃO são abertura de negócio e ficam fora do Event
+  Store. Medido em 2024-08 (ano de eleição municipal): 20.187 dos 56.550
+  eventos de MG (36%) eram CNPJs de campanha — CNAE 9492800, natureza 4090
+  (candidato a cargo político eletivo) e 3271 (diretório local de partido).
+  Não são empresas nascendo, e inflavam o volume e o percentual de
+  "sociedades". Configurável via --vars naturezas_excluidas.
+#}
+{% set naturezas_excluidas = var('naturezas_excluidas', ['4090', '3271']) %}
+
 with atual as (
     select * from {{ ref('slv_estabelecimentos') }}
     where competencia = '{{ var("competencia_atual") }}'
@@ -42,6 +52,7 @@ enriquecido as (
         e.capital_social,
         e.porte,
         e.porte_descricao,
+        e.natureza_juridica,
         mun.descricao as municipio_nome,
         cna.descricao as cnae_descricao
     from novas n
@@ -52,6 +63,11 @@ enriquecido as (
            on mun.dominio = 'MUNICIPIO' and mun.codigo = n.id_municipio
     left join {{ ref('slv_dominios') }} cna
            on cna.dominio = 'CNAE' and cna.codigo = n.cnae_principal
+    -- coalesce: natureza nula não pode derrubar o evento (NOT IN com NULL
+    -- avalia a NULL e descartaria a linha em silêncio).
+    where coalesce(e.natureza_juridica, '') not in (
+        {%- for n in naturezas_excluidas %}'{{ n }}'{% if not loop.last %}, {% endif %}{% endfor -%}
+    )
 )
 
 select
@@ -91,6 +107,7 @@ select
     cnae_descricao,
     porte,
     porte_descricao,
+    natureza_juridica,
     capital_social,
     email,
     telefone,

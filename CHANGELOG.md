@@ -6,6 +6,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.3.0] — 2026-11-13
+
+First full run on real data (2024-07 → 2024-08, all 10 slices, `--uf MG`):
+`dbt build` PASS=34, `diagnostico_eventos.py` verdict "coherent events".
+Phase 4 of the roadmap now meets its Definition of Done.
+
+### Fixed
+
+- **Election campaigns were counted as new companies.** In an election year
+  (2024-08), 20,187 of the 56,550 `NEW_COMPANY` events in MG (36%) were
+  campaign registrations: CNAE 9492800, legal nature 4090 (candidate) and
+  3271 (local party body). They are not businesses opening, and they inflated
+  both the event volume and the share of non-individual companies (e.g. 129
+  of ~214 in Varginha, Três Corações and Elói Mendes).
+  → `evt_new_company` excludes legal natures `4090` and `3271`
+  (configurable via `--vars naturezas_excluidas`) and now exposes
+  `natureza_juridica`. New data test `assert_sem_eventos_eleitorais`.
+  The ICP was never affected (its CNAE whitelist already left them out).
+
+### Found, not yet acted on
+
+- 86% of the 42 opportunities are sole proprietors (legal nature 2135, which
+  includes MEIs); company names of sole proprietors are personal names. Needs
+  a LGPD decision and validation with accountants before any digest leaves
+  the project.
+
+---
+
 ## [2.2.2] — 2026-11-12
 
 Housekeeping found while reviewing the project's current state.

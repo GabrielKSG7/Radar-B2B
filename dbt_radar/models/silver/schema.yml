@@ -58,3 +58,5 @@ models:
       - name: source_competence
         data_tests:
           - not_null
+      - name: natureza_juridica
+        description: Natureza jurídica da empresa (código CONCLA). Usada para excluir campanhas e partidos.

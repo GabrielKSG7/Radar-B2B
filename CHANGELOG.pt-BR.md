@@ -6,6 +6,34 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.3.0] — 2026-11-13
+
+Primeira execução completa com dados reais (2024-07 → 2024-08, as 10 fatias,
+`--uf MG`): `dbt build` PASS=34, `diagnostico_eventos.py` com veredito
+"eventos coerentes". A Fase 4 do roadmap passa a cumprir o seu DoD.
+
+### Corrigido
+
+- **Campanhas eleitorais eram contadas como empresas novas.** Em ano de
+  eleição (2024-08), 20.187 dos 56.550 eventos `NEW_COMPANY` de MG (36%) eram
+  registros de campanha: CNAE 9492800, natureza jurídica 4090 (candidato) e
+  3271 (diretório local de partido). Não são negócios abrindo, e inflavam o
+  volume e a fatia de sociedades (ex.: 129 de ~214 em Varginha, Três Corações
+  e Elói Mendes).
+  → `evt_new_company` exclui as naturezas `4090` e `3271` (configurável por
+  `--vars naturezas_excluidas`) e passa a expor `natureza_juridica`. Novo
+  teste de dados `assert_sem_eventos_eleitorais`. O ICP nunca foi afetado (a
+  lista de CNAEs já deixava esses casos de fora).
+
+### Descoberto, ainda sem ação
+
+- 86% das 42 oportunidades são empresário individual (natureza 2135, que
+  inclui MEI); a razão social de empresário individual é nome de pessoa
+  física. Precisa de decisão de LGPD e validação com contadores antes de
+  qualquer digest sair do projeto.
+
+---
+
 ## [2.2.2] — 2026-11-12
 
 Limpeza encontrada ao revisar o estado atual do projeto.
