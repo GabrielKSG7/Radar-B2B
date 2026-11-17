@@ -6,6 +6,25 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.4.1] — 2026-11-17
+
+Download retomável: o servidor da Receita derruba conexões longas no meio do corpo.
+
+### Corrigido
+
+- `ingestao._baixar` agora retoma com `Range: bytes=<já baixado>-` e mantém o
+  `.part` entre tentativas e entre execuções, em vez de recomeçar do zero um
+  arquivo de ~2 GB a cada tentativa (o que nunca terminava quando o servidor
+  cortava a conexão entre 0,3 e 1,5 GB). Se o servidor ignorar o `Range`, o
+  download recomeça limpo. O tamanho final é conferido contra o esperado, a
+  integridade do ZIP continua sendo validada depois, e os bytes são gravados
+  assim que chegam, então nada recebido se perde quando a conexão cai.
+- Tentativas por arquivo de 4 para 12 (espera máxima de 60 s).
+- 4 testes (`tests/test_download_retomada.py`) contra um servidor local que
+  corta a conexão no meio do corpo.
+
+---
+
 ## [2.4.0] — 2026-11-17
 
 Digest do piloto: empresário individual separado e protegido.

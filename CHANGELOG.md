@@ -6,6 +6,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.4.1] — 2026-11-17
+
+Resumable downloads: the Receita server drops long connections mid-body.
+
+### Fixed
+
+- `ingestao._baixar` now resumes with `Range: bytes=<downloaded>-` and keeps the
+  `.part` file between attempts and between runs, instead of restarting a
+  ~2 GB file from zero on every retry (which never finished when the server
+  cut the connection at 0.3–1.5 GB). If the server ignores `Range`, the
+  download restarts cleanly. Final size is checked against the expected size,
+  ZIP integrity is still validated afterwards, and bytes are written as they
+  arrive so nothing received is lost when the connection drops.
+- Attempts per file raised from 4 to 12 (backoff capped at 60 s).
+- 4 tests (`tests/test_download_retomada.py`) against a local server that cuts
+  the connection mid-body.
+
+---
+
 ## [2.4.0] — 2026-11-17
 
 Pilot digest: sole proprietors are separated and protected.

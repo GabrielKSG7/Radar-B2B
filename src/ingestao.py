@@ -82,19 +82,48 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 
 # ---------------------------------------------------------------- download
-def _baixar(url: str, destino: Path, tentativas: int = 3) -> str:
-    """Baixa uma URL. Retorna OK | NOT_FOUND | FALHOU."""
+def _baixar(url: str, destino: Path, tentativas: int = 12) -> str:
+    """Baixa uma URL com retomada. Retorna OK | NOT_FOUND | FALHOU.
+
+    A infraestrutura da Receita derruba conexões longas no meio do corpo
+    (arquivos de ~2 GB). Por isso o download é RETOMÁVEL: o `.part` é mantido
+    entre tentativas — e entre execuções — e cada nova tentativa pede só o que
+    falta (`Range: bytes=<já baixado>-`). Se o servidor ignorar o Range
+    (resposta 200), recomeçamos do zero. O tamanho final é conferido contra o
+    esperado; a integridade do ZIP é validada depois por `_zip_integro`.
+    """
     tmp = destino.with_suffix(destino.suffix + ".part")
     for n in range(1, tentativas + 1):
         try:
-            with httpx.stream("GET", url, headers=HEADERS, timeout=TIMEOUT,
+            pos = tmp.stat().st_size if tmp.exists() else 0
+            headers = dict(HEADERS)
+            if pos:
+                headers["Range"] = f"bytes={pos}-"
+                print(f"    retomando de {pos / 1e6:,.0f} MB (tentativa {n})")
+            with httpx.stream("GET", url, headers=headers, timeout=TIMEOUT,
                               verify=VERIFICAR_TLS, follow_redirects=True) as r:
                 if r.status_code == 404:
                     return "NOT_FOUND"
+                if r.status_code == 416 and pos:
+                    # Já temos o arquivo inteiro; a validação do ZIP confirma.
+                    tmp.replace(destino)
+                    return "OK"
                 r.raise_for_status()
-                with open(tmp, "wb") as f:
-                    for chunk in r.iter_bytes(chunk_size=1 << 16):
+                restante = int(r.headers.get("content-length", 0))
+                if pos and r.status_code == 206:
+                    modo = "ab"
+                    total = pos + restante if restante else None
+                else:  # sem Range (ou primeira tentativa): do início
+                    modo = "wb"
+                    total = restante or None
+                with open(tmp, modo) as f:
+                    # iter_raw sem chunk_size: grava o que chegou, sem buffer —
+                    # se a conexão cair, nada recebido se perde no .part.
+                    for chunk in r.iter_raw():
                         f.write(chunk)
+            if total and tmp.stat().st_size != total:
+                raise OSError(
+                    f"download incompleto ({tmp.stat().st_size} de {total} bytes)")
             tmp.replace(destino)
             return "OK"
         except (httpx.ConnectTimeout, httpx.ConnectError) as e:
@@ -103,8 +132,7 @@ def _baixar(url: str, destino: Path, tentativas: int = 3) -> str:
             print(f"    tentativa {n}: {type(e).__name__}: {e}")
         if n < tentativas:
             time.sleep(min(10 * 2 ** (n - 1), 60))
-    if tmp.exists():
-        tmp.unlink()
+    # Mantém o .part: a próxima execução retoma de onde parou.
     return "FALHOU"
 
 
@@ -133,7 +161,7 @@ def baixar_arquivo(nome_arquivo: str, competencia: str, destino_dir: Path) -> Pa
 
     url = url_download(nome_arquivo, competencia)
     print(f"  [GET] {nome_arquivo} ({competencia})")
-    status = _baixar(url, destino, tentativas=4)
+    status = _baixar(url, destino)
 
     if status == "OK" and _zip_integro(destino):
         print(f"  [OK] {nome_arquivo}")
@@ -147,7 +175,8 @@ def baixar_arquivo(nome_arquivo: str, competencia: str, destino_dir: Path) -> Pa
         )
     raise RuntimeError(
         f"Falha ao baixar {nome_arquivo} da competência {competencia}. "
-        f"A infraestrutura da RFB é instável; tente novamente mais tarde."
+        f"A infraestrutura da RFB é instável; o progresso foi mantido — "
+        f"rode o comando de novo para retomar de onde parou."
     )
 
 
