@@ -25,11 +25,13 @@ fatores as (
 
         -- 1. RECÊNCIA — proporcional dentro da janela do ICP.
         --    Uma empresa aberta ontem vale o peso inteiro; no limite da
-        --    janela, zero. Decaimento linear.
+        --    janela, zero. Decaimento linear, limitado a [0, peso]: um
+        --    evento datado depois da referência (dias negativos) não pode
+        --    render mais que o peso inteiro.
         round(
             m.peso_recencia
-            * greatest(0.0, 1.0 - (m.dias_desde_evento::double
-                                   / nullif(m.recencia_dias, 0)))
+            * least(1.0, greatest(0.0, 1.0 - (m.dias_desde_evento::double
+                                              / nullif(m.recencia_dias, 0))))
         )::int                                          as pts_recencia,
 
         -- 2. ADERÊNCIA DE CNAE

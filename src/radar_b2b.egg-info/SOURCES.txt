@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+src/__init__.py
+src/config.py
+src/digest.py
+src/enriquecimento.py
+src/ingestao.py
+src/observabilidade.py
+src/receita.py
+src/radar_b2b.egg-info/PKG-INFO
+src/radar_b2b.egg-info/SOURCES.txt
+src/radar_b2b.egg-info/dependency_links.txt
+src/radar_b2b.egg-info/requires.txt
+src/radar_b2b.egg-info/top_level.txt
+tests/test_pipeline.py

@@ -151,7 +151,14 @@ def main() -> None:
     ap.add_argument("--novas", type=int, default=60, help="empresas novas na atual")
     args = ap.parse_args()
 
-    hoje = date.today()
+    # Âncora temporal = último dia da competência ATUAL, nunca date.today().
+    # Com date.today(), o CI que processa 2026-08 passou a gerar empresas
+    # "abertas" depois de 31/08 a partir de setembro: dias_desde_evento ficava
+    # negativo, a recência estourava o peso do ICP e o teste
+    # assert_score_bate_com_fatores falhava. Mesma regra do macro
+    # data_referencia: as fixtures têm de ser reprodutíveis em qualquer data.
+    ano, mes = map(int, args.atual.split("-"))
+    hoje = (date(ano + mes // 12, mes % 12 + 1, 1) - timedelta(days=1))
 
     def _fabricar(idx: int, nova: bool) -> dict:
         cnae, _ = random.choice(CNAES)

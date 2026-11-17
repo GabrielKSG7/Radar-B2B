@@ -1,0 +1,186 @@
+From 51e9e10460d15d40831877923595357c9e11f50d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 13 Nov 2026 09:21:48 -0300
+Subject: [PATCH] fix: excluir campanhas e partidos (naturezas 4090/3271) do
+ Event Store
+
+Em 2024-08, 36% dos eventos NEW_COMPANY de MG eram CNPJs de campanha eleitoral.
+Adiciona natureza_juridica ao evento, filtro configuravel e teste de dados.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Q2prU26n6MTPqYB7AWFzQA
+---
+ CHANGELOG.md                                  | 28 +++++++++++++++++++
+ CHANGELOG.pt-BR.md                            | 28 +++++++++++++++++++
+ .../models/silver/events/evt_new_company.sql  | 17 +++++++++++
+ dbt_radar/models/silver/schema.yml            |  2 ++
+ .../tests/assert_sem_eventos_eleitorais.sql   |  7 +++++
+ pyproject.toml                                |  2 +-
+ 6 files changed, 83 insertions(+), 1 deletion(-)
+ create mode 100644 dbt_radar/tests/assert_sem_eventos_eleitorais.sql
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 87a8872..473c138 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+ 
+ ---
+ 
++## [2.3.0] — 2026-11-13
++
++First full run on real data (2024-07 → 2024-08, all 10 slices, `--uf MG`):
++`dbt build` PASS=34, `diagnostico_eventos.py` verdict "coherent events".
++Phase 4 of the roadmap now meets its Definition of Done.
++
++### Fixed
++
++- **Election campaigns were counted as new companies.** In an election year
++  (2024-08), 20,187 of the 56,550 `NEW_COMPANY` events in MG (36%) were
++  campaign registrations: CNAE 9492800, legal nature 4090 (candidate) and
++  3271 (local party body). They are not businesses opening, and they inflated
++  both the event volume and the share of non-individual companies (e.g. 129
++  of ~214 in Varginha, Três Corações and Elói Mendes).
++  → `evt_new_company` excludes legal natures `4090` and `3271`
++  (configurable via `--vars naturezas_excluidas`) and now exposes
++  `natureza_juridica`. New data test `assert_sem_eventos_eleitorais`.
++  The ICP was never affected (its CNAE whitelist already left them out).
++
++### Found, not yet acted on
++
++- 86% of the 42 opportunities are sole proprietors (legal nature 2135, which
++  includes MEIs); company names of sole proprietors are personal names. Needs
++  a LGPD decision and validation with accountants before any digest leaves
++  the project.
++
++---
++
+ ## [2.2.2] — 2026-11-12
+ 
+ Housekeeping found while reviewing the project's current state.
+diff --git a/CHANGELOG.pt-BR.md b/CHANGELOG.pt-BR.md
+index c281d1d..122da43 100644
+--- a/CHANGELOG.pt-BR.md
++++ b/CHANGELOG.pt-BR.md
+@@ -6,6 +6,34 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
+ 
+ ---
+ 
++## [2.3.0] — 2026-11-13
++
++Primeira execução completa com dados reais (2024-07 → 2024-08, as 10 fatias,
++`--uf MG`): `dbt build` PASS=34, `diagnostico_eventos.py` com veredito
++"eventos coerentes". A Fase 4 do roadmap passa a cumprir o seu DoD.
++
++### Corrigido
++
++- **Campanhas eleitorais eram contadas como empresas novas.** Em ano de
++  eleição (2024-08), 20.187 dos 56.550 eventos `NEW_COMPANY` de MG (36%) eram
++  registros de campanha: CNAE 9492800, natureza jurídica 4090 (candidato) e
++  3271 (diretório local de partido). Não são negócios abrindo, e inflavam o
++  volume e a fatia de sociedades (ex.: 129 de ~214 em Varginha, Três Corações
++  e Elói Mendes).
++  → `evt_new_company` exclui as naturezas `4090` e `3271` (configurável por
++  `--vars naturezas_excluidas`) e passa a expor `natureza_juridica`. Novo
++  teste de dados `assert_sem_eventos_eleitorais`. O ICP nunca foi afetado (a
++  lista de CNAEs já deixava esses casos de fora).
++
++### Descoberto, ainda sem ação
++
++- 86% das 42 oportunidades são empresário individual (natureza 2135, que
++  inclui MEI); a razão social de empresário individual é nome de pessoa
++  física. Precisa de decisão de LGPD e validação com contadores antes de
++  qualquer digest sair do projeto.
++
++---
++
+ ## [2.2.2] — 2026-11-12
+ 
+ Limpeza encontrada ao revisar o estado atual do projeto.
+diff --git a/dbt_radar/models/silver/events/evt_new_company.sql b/dbt_radar/models/silver/events/evt_new_company.sql
+index 6165ec5..2f4c391 100644
+--- a/dbt_radar/models/silver/events/evt_new_company.sql
++++ b/dbt_radar/models/silver/events/evt_new_company.sql
+@@ -18,6 +18,16 @@
+   previous_value, current_value, confidence, event_metadata.
+ */
+ 
++{#
++  Naturezas jurídicas que NÃO são abertura de negócio e ficam fora do Event
++  Store. Medido em 2024-08 (ano de eleição municipal): 20.187 dos 56.550
++  eventos de MG (36%) eram CNPJs de campanha — CNAE 9492800, natureza 4090
++  (candidato a cargo político eletivo) e 3271 (diretório local de partido).
++  Não são empresas nascendo, e inflavam o volume e o percentual de
++  "sociedades". Configurável via --vars naturezas_excluidas.
++#}
++{% set naturezas_excluidas = var('naturezas_excluidas', ['4090', '3271']) %}
++
+ with atual as (
+     select * from {{ ref('slv_estabelecimentos') }}
+     where competencia = '{{ var("competencia_atual") }}'
+@@ -42,6 +52,7 @@ enriquecido as (
+         e.capital_social,
+         e.porte,
+         e.porte_descricao,
++        e.natureza_juridica,
+         mun.descricao as municipio_nome,
+         cna.descricao as cnae_descricao
+     from novas n
+@@ -52,6 +63,11 @@ enriquecido as (
+            on mun.dominio = 'MUNICIPIO' and mun.codigo = n.id_municipio
+     left join {{ ref('slv_dominios') }} cna
+            on cna.dominio = 'CNAE' and cna.codigo = n.cnae_principal
++    -- coalesce: natureza nula não pode derrubar o evento (NOT IN com NULL
++    -- avalia a NULL e descartaria a linha em silêncio).
++    where coalesce(e.natureza_juridica, '') not in (
++        {%- for n in naturezas_excluidas %}'{{ n }}'{% if not loop.last %}, {% endif %}{% endfor -%}
++    )
+ )
+ 
+ select
+@@ -91,6 +107,7 @@ select
+     cnae_descricao,
+     porte,
+     porte_descricao,
++    natureza_juridica,
+     capital_social,
+     email,
+     telefone,
+diff --git a/dbt_radar/models/silver/schema.yml b/dbt_radar/models/silver/schema.yml
+index 2d630f7..f84ff22 100644
+--- a/dbt_radar/models/silver/schema.yml
++++ b/dbt_radar/models/silver/schema.yml
+@@ -58,3 +58,5 @@ models:
+       - name: source_competence
+         data_tests:
+           - not_null
++      - name: natureza_juridica
++        description: Natureza jurídica da empresa (código CONCLA). Usada para excluir campanhas e partidos.
+diff --git a/dbt_radar/tests/assert_sem_eventos_eleitorais.sql b/dbt_radar/tests/assert_sem_eventos_eleitorais.sql
+new file mode 100644
+index 0000000..4ba6e62
+--- /dev/null
++++ b/dbt_radar/tests/assert_sem_eventos_eleitorais.sql
+@@ -0,0 +1,7 @@
++-- Campanhas e diretórios partidários (naturezas 4090 e 3271) não são abertura
++-- de negócio e não podem entrar no Event Store. Em 2024-08 eles eram 36% dos
++-- eventos de MG; sem este teste o filtro do evt_new_company poderia sumir numa
++-- refatoração sem ninguém notar.
++select event_id, cnpj, natureza_juridica
++from {{ ref('evt_new_company') }}
++where natureza_juridica in ('4090', '3271')
+diff --git a/pyproject.toml b/pyproject.toml
+index 75de757..6610a74 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "radar-b2b"
+-version = "2.2.2"
++version = "2.3.0"
+ description = "Motor de eventos e oportunidades B2B sobre a base pública de CNPJ"
+ requires-python = ">=3.10"
+ dependencies = [
+-- 
+2.43.0
+

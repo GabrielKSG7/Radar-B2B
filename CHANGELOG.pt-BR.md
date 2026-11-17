@@ -6,6 +6,33 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.3.1] — 2026-11-16
+
+### Corrigido
+
+- **O CI ficou vermelho sozinho com a virada do calendário.** As fixtures
+  sintéticas datavam as empresas novas a partir de `date.today()`, enquanto o
+  CI processa a competência `2026-08` e mede recência contra 31/08/2026. A
+  partir de setembro, parte das fixtures "abria" depois da data de
+  referência, ficava com `dias_desde_evento` negativo, ganhava mais pontos de
+  recência do que o peso do ICP permite (68 de 30) e o teste
+  `assert_score_bate_com_fatores` falhava.
+  → `gerar_fixtures.py` passa a ancorar as datas no último dia de `--atual` —
+  a mesma regra do macro `data_referencia()` — e as fixtures ficam
+  reprodutíveis em qualquer data. Por defesa, `gld_opportunities` limita o
+  fator de recência a `[0, peso]`.
+- **5 testes unitários falhavam numa instalação limpa.** Eles usam o `.df()`
+  do DuckDB, que exige pandas, ausente do extra `dev`. `pandas` adicionado ao
+  `dev`.
+
+### Documentação
+
+- README reestruturado: selos, diagrama de arquitetura em Mermaid, exemplo de
+  digest, tabela de decisões técnicas e estado com dados reais; detalhes
+  operacionais recolhidos.
+
+---
+
 ## [2.3.0] — 2026-11-13
 
 Primeira execução completa com dados reais (2024-07 → 2024-08, as 10 fatias,

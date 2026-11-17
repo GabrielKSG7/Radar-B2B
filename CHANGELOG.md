@@ -6,6 +6,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.3.1] — 2026-11-16
+
+### Fixed
+
+- **CI turned red on its own after the calendar moved.** The synthetic
+  fixtures dated new companies relative to `date.today()`, while the CI run
+  processes vintage `2026-08` and measures recency against 2026-08-31. From
+  September on, some fixtures "opened" after the reference date, got negative
+  `dias_desde_evento`, earned more recency points than the ICP weight allows
+  (68 of 30) and `assert_score_bate_com_fatores` failed.
+  → `gerar_fixtures.py` now anchors dates to the last day of `--atual` — the
+  same rule as the `data_referencia()` macro — so fixtures are reproducible on
+  any date. Defensively, `gld_opportunities` clamps the recency factor to
+  `[0, weight]`.
+- **5 unit tests failed on a clean install.** They call DuckDB's `.df()`,
+  which needs pandas, absent from the `dev` extra. `pandas` added to `dev`.
+
+### Documentation
+
+- README restructured: badges, Mermaid architecture diagram, sample digest,
+  key-decisions table, real-data status; operational details collapsed.
+
+---
+
 ## [2.3.0] — 2026-11-13
 
 First full run on real data (2024-07 → 2024-08, all 10 slices, `--uf MG`):
