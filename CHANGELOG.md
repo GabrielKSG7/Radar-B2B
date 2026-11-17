@@ -6,6 +6,41 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.4.0] — 2026-11-17
+
+Pilot digest: sole proprietors are separated and protected.
+
+### Added
+
+- `src/privacidade.py`: for sole proprietors (legal nature 2135, which includes
+  MEIs) the trade name of the person is reduced to initials (digits, which can
+  be a CPF, removed), phone and e-mail are dropped, and a trade name that just
+  repeats the person's name is omitted. Records with no legal nature are
+  treated as protected. The CNPJ stays: it is the public identifier.
+- Digest split into **Companies** (full blocks by priority) and **Sole
+  proprietors** (compact table, no contact, no commercial reading).
+- Pilot spreadsheet `radar_piloto_<icp>_<date>.csv` (`;` separator, UTF-8 with
+  BOM, opens in Excel pt-BR) with feedback columns.
+- `gld_opportunities` exposes `natureza_juridica`.
+- 8 tests (`tests/test_privacidade.py`); the digest test runs the production
+  `digest.gerar` over a temporary DuckDB and checks that no personal field
+  leaks into the Markdown or the CSV.
+
+### Changed
+
+- Sole proprietors are no longer sent to the LLM (their name is personal data
+  and the digest shows them without commercial reading); for the rest, the
+  prompt goes through the same masking as a safeguard. The LLM failure rate is
+  now measured over actual LLM attempts.
+- The "no AI interpretation" warning counts companies only.
+
+### Note
+
+The rule is meant for a manual pilot with a few offices. Review it with someone
+who knows LGPD before commercializing.
+
+---
+
 ## [2.3.1] — 2026-11-16
 
 ### Fixed

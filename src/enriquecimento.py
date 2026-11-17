@@ -34,6 +34,7 @@ import duckdb
 from pydantic import BaseModel, Field, ValidationError
 
 from . import observabilidade as obs
+from . import privacidade
 from .config import DB_PATH
 
 # gemini-2.0-flash foi desligado em 01/06/2026; o default acompanha o sucessor
@@ -83,6 +84,7 @@ REGRAS INEGOCIÁVEIS:
 
 
 def _prompt(row: dict) -> str:
+    row = privacidade.para_exibicao(row)   # nunca enviar nome de pessoa física ao LLM
     return f"""EVENTO DETECTADO: {row['event_type']} em {row['event_date']}
 (confiança da detecção: {row['detection_confidence']})
 
@@ -211,11 +213,14 @@ def enriquecer(usar_ia: bool = True, limite: int | None = None) -> dict:
         print("[AVISO] GEMINI_API_KEY ausente. Sem enriquecimento por IA.")
         print("[AVISO] O digest sairá marcado como NÃO ENRIQUECIDO.")
 
-    linhas, falhas, n_llm, n_heur = [], 0, 0, 0
+    linhas, falhas, n_llm, n_heur, tentativas = [], 0, 0, 0, 0
     print(f"[PROCESSANDO] {len(pendentes)} oportunidade(s)...")
 
-    for i, row in enumerate(pendentes, 1):
-        if client:
+    for row in pendentes:
+        # Empresário individual não vai ao LLM: o digest o mostra numa tabela
+        # compacta, sem leitura comercial, e o nome é de pessoa física.
+        if client and not privacidade.deve_proteger(row):
+            tentativas += 1
             try:
                 ctx = chamar_llm(client, row)
                 ctx["origem"], ctx["modelo"] = "llm", MODELO
@@ -229,10 +234,10 @@ def enriquecer(usar_ia: bool = True, limite: int | None = None) -> dict:
                 ctx["origem"], ctx["modelo"] = "heuristica", None
                 n_heur += 1
                 # Falha sistêmica: parar em vez de entregar digest degradado.
-                if i >= 5 and falhas / i > LIMIAR_FALHA:
+                if tentativas >= 5 and falhas / tentativas > LIMIAR_FALHA:
                     con.close()
                     raise RuntimeError(
-                        f"Taxa de falha do LLM em {falhas}/{i} "
+                        f"Taxa de falha do LLM em {falhas}/{tentativas} "
                         f"(>{LIMIAR_FALHA:.0%}). Interrompendo: verifique a "
                         f"chave de API e se o modelo '{MODELO}' está ativo.") from e
         else:

@@ -6,6 +6,42 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.4.0] — 2026-11-17
+
+Digest do piloto: empresário individual separado e protegido.
+
+### Adicionado
+
+- `src/privacidade.py`: para empresário individual (natureza jurídica 2135, que
+  inclui o MEI) a razão social vira só iniciais (dígitos, que podem ser CPF,
+  removidos), telefone e e-mail são omitidos, e o nome fantasia que apenas
+  repete o nome da pessoa também. Cadastro sem natureza jurídica é tratado como
+  protegido. O CNPJ permanece: é a identificação pública.
+- Digest dividido em **Empresas** (blocos completos por prioridade) e
+  **Empresários individuais** (tabela compacta, sem contato nem leitura
+  comercial).
+- Planilha do piloto `radar_piloto_<icp>_<data>.csv` (separador `;`, UTF-8 com
+  BOM, abre direto no Excel em pt-BR) com colunas de feedback.
+- `gld_opportunities` passa a expor `natureza_juridica`.
+- 8 testes (`tests/test_privacidade.py`); o teste do digest roda o
+  `digest.gerar` de produção sobre um DuckDB temporário e confere que nenhum
+  dado pessoal vaza para o Markdown nem para o CSV.
+
+### Alterado
+
+- Empresário individual deixa de ser enviado ao LLM (o nome é dado pessoal e o
+  digest o mostra sem leitura comercial); para os demais, o prompt passa pela
+  mesma máscara como salvaguarda. A taxa de falha do LLM agora é medida sobre
+  as chamadas reais.
+- O aviso "sem interpretação de IA" conta só as empresas.
+
+### Observação
+
+A regra vale para um piloto manual com poucos escritórios. Revise-a com quem
+entende de LGPD antes de comercializar.
+
+---
+
 ## [2.3.1] — 2026-11-16
 
 ### Corrigido

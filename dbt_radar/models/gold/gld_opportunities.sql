@@ -95,6 +95,7 @@ select
     cnae_principal,
     cnae_descricao,
     porte_descricao,
+    natureza_juridica,
     capital_social,
     email,
     telefone,

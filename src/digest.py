@@ -19,12 +19,14 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from datetime import datetime
 
 import duckdb
 
 from . import observabilidade as obs
+from . import privacidade
 from .config import DB_PATH, DIGEST_DIR
 
 FAIXAS = [("Alta", 70), ("Média", 50), ("Baixa", 0)]
@@ -120,6 +122,56 @@ def _bloco(row: dict) -> str:
 """
 
 
+def _secao_individuais(rows: list[dict]) -> list[str]:
+    """Empresários individuais: tabela compacta, nome mascarado, sem contato."""
+    if not rows:
+        return []
+    md = [
+        f"\n## Empresários individuais ({len(rows)})\n",
+        "> Nome e contato omitidos neste piloto: em empresário individual a razão "
+        "social costuma ser o nome da pessoa. O CNPJ segue sendo a identificação "
+        "pública do cadastro.\n",
+        "| # | Score | Setor | Onde | Porte | Capital | Aberta em | Nome fantasia | CNPJ | Marcação |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for n, r in enumerate(rows, 1):
+        x = privacidade.para_exibicao(r)
+        md.append(
+            f"| {n} | {r['opportunity_score']} | {r.get('cnae_descricao')} "
+            f"(`{r.get('cnae_principal')}`) | {r.get('municipio_nome')}/{r.get('uf')} "
+            f"| {r.get('porte_descricao')} | {_fmt_capital(r.get('capital_social'))} "
+            f"| {r['event_date']} | {x.get('nome_fantasia') or '—'} | `{r['cnpj']}` "
+            f"| [ ] relevante · [ ] contatada |")
+    md.append("\n---\n")
+    return md
+
+
+CAMPOS_CSV = [
+    "secao", "score", "faixa", "razao_social", "nome_fantasia", "cnpj",
+    "municipio", "uf", "cnae", "cnae_descricao", "porte", "capital_social",
+    "aberta_em", "telefone", "email", "por_que_apareceu",
+    "relevante", "contatada", "motivo",
+]
+
+
+def _exportar_csv(linhas: list[dict], caminho) -> None:
+    """Planilha do piloto. ';' e UTF-8 com BOM: abre direto no Excel em pt-BR."""
+    with open(caminho, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(CAMPOS_CSV)
+        for r in linhas:
+            x = privacidade.para_exibicao(r)
+            w.writerow([
+                "Empresário individual" if privacidade.deve_proteger(r) else "Empresa",
+                r["opportunity_score"], _faixa(r["opportunity_score"]),
+                x.get("razao_social"), x.get("nome_fantasia"), r["cnpj"],
+                r.get("municipio_nome"), r.get("uf"), r.get("cnae_principal"),
+                r.get("cnae_descricao"), r.get("porte_descricao"),
+                r.get("capital_social"), r["event_date"],
+                x.get("telefone"), x.get("email"), r.get("score_explanation"),
+                "", "", ""])
+
+
 def gerar(top: int | None = None) -> tuple[str, int]:
     con = duckdb.connect(str(DB_PATH))
     con.execute(DDL_FEEDBACK)
@@ -146,23 +198,29 @@ def gerar(top: int | None = None) -> tuple[str, int]:
     competencia = linhas[0].get("source_competence")
     icp = linhas[0].get("icp_nome")
     hoje = datetime.now().strftime("%Y-%m-%d")
-    sem_ia = sum(1 for r in linhas if r.get("origem") != "llm")
+
+    # Privacidade do piloto: empresário individual vai para seção própria, com
+    # nome mascarado e sem contato (src/privacidade.py).
+    empresas = [r for r in linhas if not privacidade.deve_proteger(r)]
+    individuais = [r for r in linhas if privacidade.deve_proteger(r)]
+    sem_ia = sum(1 for r in empresas if r.get("origem") != "llm")
 
     por_faixa: dict[str, list[dict]] = {"Alta": [], "Média": [], "Baixa": []}
-    for r in linhas:
+    for r in empresas:
         por_faixa[_faixa(r["opportunity_score"])].append(r)
 
     md = ["# Radar B2B — Digest de Oportunidades\n",
           f"**Data:** {hoje}  ",
           f"**Perfil (ICP):** {icp}  ",
           f"**Competência analisada:** {competencia}  ",
-          f"**Oportunidades:** {len(linhas)} "
+          f"**Oportunidades:** {len(linhas)} — empresas {len(empresas)} "
           f"(alta {len(por_faixa['Alta'])} · média {len(por_faixa['Média'])} "
-          f"· baixa {len(por_faixa['Baixa'])})\n"]
+          f"· baixa {len(por_faixa['Baixa'])}) · "
+          f"empresários individuais {len(individuais)}\n"]
 
     if sem_ia:
         md.append(
-            f"> **Atenção:** {sem_ia} de {len(linhas)} oportunidades estão "
+            f"> **Atenção:** {sem_ia} de {len(empresas)} empresas estão "
             f"**sem interpretação de IA**. Os campos de leitura comercial "
             f"foram derivados apenas do cadastro público, não de análise. "
             f"Verifique a configuração do enriquecimento.\n")
@@ -176,8 +234,10 @@ def gerar(top: int | None = None) -> tuple[str, int]:
         grupo = por_faixa[faixa]
         if not grupo:
             continue
-        md.append(f"\n## Prioridade {faixa} ({len(grupo)})\n")
+        md.append(f"\n## Empresas — prioridade {faixa} ({len(grupo)})\n")
         md.extend(_bloco(r) for r in grupo)
+
+    md.extend(_secao_individuais(individuais))
 
     md.append(
         f"\n<sub>Gerado pelo Radar B2B em {hoje}. "
@@ -189,6 +249,7 @@ def gerar(top: int | None = None) -> tuple[str, int]:
     DIGEST_DIR.mkdir(parents=True, exist_ok=True)
     saida = DIGEST_DIR / f"radar_digest_{icp}_{hoje}.md"
     saida.write_text(conteudo, encoding="utf-8")
+    _exportar_csv(linhas, DIGEST_DIR / f"radar_piloto_{icp}_{hoje}.csv")
 
     # Registra as oportunidades enviadas, para o ciclo de feedback (§13).
     con.executemany(
@@ -199,6 +260,8 @@ def gerar(top: int | None = None) -> tuple[str, int]:
     con.close()
 
     print(f"[OK] Digest gerado: {saida}")
+    print(f"[OK] Planilha do piloto: radar_piloto_{icp}_{hoje}.csv "
+          f"({len(empresas)} empresas, {len(individuais)} empresários individuais)")
     if sem_ia:
         print(f"[AVISO] {sem_ia} oportunidade(s) sem interpretação de IA "
               f"— o digest está marcado.")
