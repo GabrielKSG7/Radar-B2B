@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.5.4] — 2026-11-18
+
+### Fixed
+- `scripts/listar_escritorios.py`: ties no longer break alphabetically (the
+  default list was cut at letter D); one row per office (same base CNPJ or
+  same own-domain e-mail); internet providers (and domains shared by 3+
+  offices) no longer count as "own-domain e-mail".
+
+---
+
 ## [2.5.3] — 2026-11-18
 
 First pilot round: fixes found while reviewing the material sent to the

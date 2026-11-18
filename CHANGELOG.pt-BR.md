@@ -6,6 +6,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.5.4] — 2026-11-18
+
+### Corrigido
+- `scripts/listar_escritorios.py`: o desempate deixou de ser alfabético (a
+  lista padrão era cortada na letra D); um registro por escritório (mesmo CNPJ
+  básico ou mesmo e-mail de domínio próprio); provedores de internet (e
+  domínios usados por 3 ou mais escritórios) não contam mais como "e-mail de
+  domínio próprio".
+
+---
+
 ## [2.5.3] — 2026-11-18
 
 Primeira rodada do piloto: ajustes que a revisão do material enviado aos

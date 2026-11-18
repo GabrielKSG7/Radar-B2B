@@ -52,3 +52,47 @@ def test_ordem_por_facilidade_de_contato():
 
 def test_limite():
     assert len(mod.listar(_base(), ["VARGINHA"], 1, date(2026, 11, 17))) == 1
+
+
+def _mini(con, linhas):
+    """Apaga a base de exemplo e carrega só as linhas (cnpj, basico, razao, email, inicio, matriz)."""
+    con.execute("delete from main_silver.slv_estabelecimentos")
+    con.execute("delete from main_silver.slv_empresas")
+    for cnpj, base, razao, email, inicio, matriz in linhas:
+        con.execute("insert into main_silver.slv_estabelecimentos values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (cnpj, base, "Z", "N", matriz, "02", "6920601", "1", "MG", "X", email, "35999990000", inicio))
+        con.execute("insert into main_silver.slv_empresas values (?,?,?,?)", (base, "Z", razao, "2062"))
+    return con
+
+
+def test_mesmo_escritorio_com_varios_cnpjs_aparece_uma_vez():
+    con = _mini(_base(), [
+        ("10", "9", "ALFA LTDA", "a@alfa.com.br", date(2010, 1, 1), "1"),
+        ("11", "9", "ALFA LTDA", "a@alfa.com.br", date(2012, 1, 1), "2"),
+        ("12", "8", "BETA LTDA", "a@alfa.com.br", date(2011, 1, 1), "1"),
+    ])
+    r = mod.listar(con, ["VARGINHA"], 10, date(2026, 11, 17))
+    assert len(r) == 1 and r[0]["cnpj"] == "10"
+
+
+def test_provedor_de_internet_nao_conta_como_dominio_proprio():
+    con = _mini(_base(), [("20", "7", "GAMA LTDA", "gama@netvga.com.br", date(2010, 1, 1), "1")])
+    r = mod.listar(con, ["VARGINHA"], 10, date(2026, 11, 17))
+    assert "domínio próprio" not in r[0]["fatores"]
+
+
+def test_dominio_compartilhado_por_varios_escritorios_e_provedor():
+    con = _mini(_base(), [
+        (str(30 + i), str(40 + i), f"X{i} LTDA", f"x{i}@portal.com.br", date(2010, 1, 1), "1")
+        for i in range(3)])
+    r = mod.listar(con, ["VARGINHA"], 10, date(2026, 11, 17))
+    assert all("domínio próprio" not in x["fatores"] for x in r)
+
+
+def test_empate_nao_segue_ordem_alfabetica():
+    base = [(str(50 + i), str(60 + i), f"{n} LTDA", f"c{i}@{n.lower()}.com.br", date(2010, 1, 1), "1")
+            for i, n in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ")]
+    con = _mini(_base(), base)
+    r = mod.listar(con, ["VARGINHA"], 5, date(2026, 11, 17))
+    assert [x["razao_social"][0] for x in r] != list("ABCDE")
+    assert r == mod.listar(con, ["VARGINHA"], 5, date(2026, 11, 17))
