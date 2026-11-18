@@ -34,7 +34,7 @@ with atual as (
 ),
 
 anterior as (
-    select cnpj from {{ ref('slv_estabelecimentos') }}
+    select cnpj, cnpj_basico from {{ ref('slv_estabelecimentos') }}
     where competencia = '{{ var("competencia_anterior") }}'
 ),
 
@@ -43,6 +43,9 @@ novas as (
     from atual a
     where a.situacao_cadastral = '02'          -- apenas estabelecimentos ativos
       and not exists (select 1 from anterior p where p.cnpj = a.cnpj)
+      -- Filial nova de uma empresa que já existia na competência anterior
+      -- não é empresa nascendo: já tem contador. Fica fora deste evento.
+      and not exists (select 1 from anterior p where p.cnpj_basico = a.cnpj_basico)
 ),
 
 enriquecido as (

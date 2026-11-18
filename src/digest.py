@@ -275,7 +275,7 @@ def gerar(top: int | None = None) -> tuple[str, int]:
 
     md = ["# Radar B2B — Digest de Oportunidades\n",
           f"**Data:** {hoje}  ",
-          f"**Perfil (ICP):** {icp}  ",
+          f"**Perfil de busca:** {icp}  ",
           f"**Competência analisada:** {competencia}  ",
           *([f"**Dados da Receita até:** {ancora}  "] if ancora else []),
           f"**Oportunidades:** {len(linhas)} — empresas {len(empresas)} "

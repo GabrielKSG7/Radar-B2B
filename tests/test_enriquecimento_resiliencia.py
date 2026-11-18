@@ -22,7 +22,7 @@ def _resp(**campos):
         "publico_alvo": "Consumidores locais.",
         "hipotese_de_dor": "Empresas deste setor costumam ter fluxo de caixa curto.",
         "explicacao_relevancia": "Empresa recém-aberta; pode se beneficiar de BPO.",
-        "acao_sugerida": "Contato consultivo apresentando a oferta do ICP.",
+        "acao_sugerida": "Contato consultivo apresentando a oferta do escritório.",
         "confianca": "media",
     }
     base.update(campos)
@@ -276,3 +276,28 @@ def test_texto_desacentuado_pede_reescrita_e_aceita_a_corrigida():
 
 def test_system_exige_acentuacao():
     assert "acentuação" in enr.SYSTEM
+
+
+# ---- v2.5.3 -----------------------------------------------------------------
+
+def test_texto_rejeitado_no_principal_usa_o_modelo_reserva(monkeypatch):
+    monkeypatch.setattr(enr, "MODELO_RESERVA", "reserva")
+    ruim = _resp(acao_sugerida="Chamar no LinkedIn e oferecer pacote de abertura.")
+    cli = ClienteFalso([ruim, ruim, _resp()])      # 2 do principal + 1 da reserva
+    ctx, modelo = enr.chamar_com_resiliencia(cli, ROW, dormir=lambda s: None)
+    assert modelo == "reserva"
+    assert cli.modelos == ["principal", "principal", "reserva"]
+    assert "linkedin" not in ctx["acao_sugerida"].lower()
+
+
+def test_texto_rejeitado_nos_dois_modelos_levanta(monkeypatch):
+    monkeypatch.setattr(enr, "MODELO_RESERVA", "reserva")
+    ruim = _resp(acao_sugerida="Chamar no LinkedIn.")
+    cli = ClienteFalso([ruim] * 4)
+    with pytest.raises(enr.ConteudoRejeitado):
+        enr.chamar_com_resiliencia(cli, ROW, dormir=lambda s: None)
+
+
+def test_sigla_icp_no_texto_e_violacao():
+    achados = enr.violacoes({"explicacao_relevancia": "Conecta o evento à oferta do ICP."})
+    assert any("icp" in a.lower() for a in achados)

@@ -63,7 +63,14 @@ def explicacao_para_exibicao(row: dict) -> str | None:
     """`score_explanation` coerente com o que o digest mostra: no empresário
     individual o contato é omitido, então "Contato disponível" enganaria."""
     texto = row.get("score_explanation")
-    if texto and deve_proteger(row):
+    if not texto:
+        return texto
+    if deve_proteger(row):
+        omitido = True
+    else:
+        x = para_exibicao(row)
+        omitido = not x.get("telefone") and not x.get("email")
+    if omitido:
         texto = re.sub(r"Contato disponível \(\+(\d+)\)",
                        r"Cadastro com contato (+\1; contato omitido no piloto)",
                        texto)

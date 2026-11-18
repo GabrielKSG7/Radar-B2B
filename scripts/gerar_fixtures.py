@@ -267,12 +267,17 @@ def main() -> None:
     print("Gerando fixtures sintéticas (formato real da Receita)...")
     antigas = [_fabricar(i, nova=False) for i in range(1, args.base + 1)]
     emails_da_base(antigas)
+    # Empresa antiga ativa em MG: na competência atual ganha uma FILIAL, que
+    # não pode virar NEW_COMPANY (a empresa já existia).
+    mae = antigas[100]
+    mae["situacao"], mae["municipio"], mae["uf"] = "02", "5403", "MG"
+    filial_de_existente = {**mae, "ordem": "0002", "matriz_filial": "2"}
     gerar(args.anterior, antigas, hoje)
 
     # A competência atual = as antigas + um bloco de empresas realmente novas.
     novas = [_fabricar(args.base + i, nova=True) for i in range(1, args.novas + 1)]
     novas += casos_sinais(hoje)
-    gerar(args.atual, antigas + novas, hoje)
+    gerar(args.atual, antigas + novas + [filial_de_existente], hoje)
 
     print(f"\nOK. {args.novas + len(casos_sinais(hoje))} empresas existem apenas em "
           f"{args.atual} ({len(casos_sinais(hoje))} são casos de sinais) — "

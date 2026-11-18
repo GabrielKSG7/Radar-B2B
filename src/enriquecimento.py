@@ -83,7 +83,7 @@ class ContextoComercial(BaseModel):
         description="HIPÓTESE de dor operacional típica do setor/estágio. "
                     "Não é um fato apurado sobre esta empresa.")
     explicacao_relevancia: str = Field(
-        description="Por que este evento importa para o ICP informado.")
+        description="Por que este evento importa para o escritório de contabilidade.")
     acao_sugerida: str = Field(
         description="Próximo passo comercial concreto.")
     confianca: Literal["alta", "media", "baixa"] = Field(
@@ -112,7 +112,9 @@ REGRAS INEGOCIÁVEIS:
 - Escreva em português do Brasil, com acentuação e cedilha corretas (ção, ã,
   é, ê, í, ó, ç). Nunca troque "ç" por "c" nem remova acentos. Não invente
   palavras.
-- A explicação de relevância deve conectar o evento à oferta do ICP.
+- A explicação de relevância deve conectar o evento à oferta do escritório de
+  contabilidade. Nunca use a sigla "ICP": diga "perfil de cliente" ou "região
+  de atuação".
 
 CONFIANÇA (da leitura comercial, não da detecção do evento):
 - "media" é o padrão: você só tem CNAE, porte, local e capital.
@@ -128,7 +130,7 @@ PROIBIDOS = re.compile(
     r"urgente|abertura de (empresa|cnpj|contabilidade)|"
     r"(pacote|serviços?|consultoria|assessoria|processo)s? (inicial )?de abertura|"
     r"abrir (a )?empresa|simples nacional|\bmei\b|linkedin|whatsapp|instagram|"
-    r"presencial|\bvisitas?\b|telefone|e-?mail|estructur|empresa nueva",
+    r"presencial|\bvisitas?\b|telefone|e-?mail|estructur|empresa nueva|\bicp\b",
     re.IGNORECASE)
 # Afirmar necessidade da EMPRESA só é problema onde o texto fala dela. Em
 # público_alvo, "empresas que necessitam de transporte" descreve os clientes.
@@ -310,7 +312,8 @@ def _chamar_modelo(client, row: dict, modelo: str, dormir) -> dict:
 
 
 def chamar_com_resiliencia(client, row: dict, dormir=None) -> tuple[dict, str]:
-    """Modelo principal com backoff; se esgotar, o modelo reserva (se houver).
+    """Modelo principal com backoff; se esgotar ou se o texto for rejeitado
+    duas vezes, o modelo reserva (se houver).
     Devolve (leitura, modelo realmente usado). `dormir` é injetável nos testes;
     resolvido na chamada para que time.sleep possa ser substituído."""
     dormir = dormir or time.sleep
@@ -320,10 +323,12 @@ def chamar_com_resiliencia(client, row: dict, dormir=None) -> tuple[dict, str]:
     for modelo in modelos:
         try:
             return _chamar_modelo(client, row, modelo, dormir), modelo
-        except ErroTransitorioLLM as e:
+        except (ErroTransitorioLLM, ConteudoRejeitado) as e:
             ultimo = e
             if modelo != modelos[-1]:
-                print(f"  [RESERVA] '{modelo}' indisponível; tentando "
+                motivo = ("indisponível" if isinstance(e, ErroTransitorioLLM)
+                          else "com texto rejeitado")
+                print(f"  [RESERVA] '{modelo}' {motivo}; tentando "
                       f"'{modelos[-1]}'")
     assert ultimo is not None
     raise ultimo

@@ -291,3 +291,22 @@ def test_cnpj_excluido_some_do_digest_e_da_contagem(tmp_path, monkeypatch):
                         lambda caminho=arq: {"33333333000193": "x"})
     md, csv_txt = _gerar(tmp_path, monkeypatch)
     assert "BETA COMERCIO" not in md and "BETA COMERCIO" not in csv_txt
+
+
+def test_cabecalho_do_digest_nao_usa_a_sigla_icp(tmp_path, monkeypatch):
+    md, _ = _gerar(tmp_path, monkeypatch)
+    assert "(ICP)" not in md and "Perfil de busca" in md
+
+
+def test_contato_disponivel_some_quando_nada_de_contato_e_exibido():
+    row = {"natureza_juridica": "2062", "telefone": "4444444444",
+           "email": "x@escritorio.com.br", "sinal_contador_atual": True,
+           "score_explanation": "Contato disponível (+6) · outro (+5)"}
+    assert "contato omitido no piloto" in privacidade.explicacao_para_exibicao(row)
+
+
+def test_contato_disponivel_fica_quando_o_telefone_e_exibido():
+    row = {"natureza_juridica": "2062", "telefone": "3532215704",
+           "email": "x@escritorio.com.br", "sinal_contador_atual": True,
+           "score_explanation": "Contato disponível (+10)"}
+    assert privacidade.explicacao_para_exibicao(row) == "Contato disponível (+10)"

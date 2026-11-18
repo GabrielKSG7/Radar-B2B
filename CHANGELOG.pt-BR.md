@@ -6,6 +6,34 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.5.3] — 2026-11-18
+
+Primeira rodada do piloto: ajustes que a revisão do material enviado aos
+escritórios apontou.
+
+### Adicionado
+
+- **Curadoria manual por CNPJ.** `config/curadoria/excluir_cnpj.txt` (`cnpj;motivo`)
+  retira oportunidades do digest e da planilha, com cabeçalho e contagens
+  recalculados.
+- **`scripts/listar_escritorios.py`:** lista escritórios de contabilidade da
+  região a partir da própria base (só pessoa jurídica ativa), com planilha de
+  acompanhamento.
+
+### Corrigido
+
+- **Filial de empresa que já existia** deixa de ser NEW_COMPANY (novo teste dbt
+  `assert_filial_de_empresa_existente_fora_dos_eventos`).
+- **Modelo reserva também quando o texto é rejeitado** duas vezes pelo
+  validador, e não só em erro de provedor.
+- **Sigla "ICP" fora do texto do leitor:** cabeçalho do digest ("Perfil de
+  busca") e prompt da IA; a sigla passou a ser termo proibido na leitura.
+- **Telefone de mentira** (4444444444, dígitos todos iguais) não é exibido.
+- **"Contato disponível"** só aparece quando algum contato é exibido.
+- Aviso do dbt sobre `seeds` sem pasta de seeds removido.
+
+---
+
 ## [2.5.2] — 2026-11-17
 
 Terceira passada no digest real: ele ainda mostrava duas coisas que um

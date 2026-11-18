@@ -6,6 +6,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.5.3] — 2026-11-18
+
+First pilot round: fixes found while reviewing the material sent to the
+offices.
+
+### Added
+
+- **Manual curation by CNPJ.** `config/curadoria/excluir_cnpj.txt`
+  (`cnpj;reason`) removes opportunities from the digest and spreadsheet, with
+  headers and counts recomputed.
+- **`scripts/listar_escritorios.py`:** lists accounting offices in the region
+  from the platform's own data (active legal entities only), with a tracking
+  spreadsheet.
+
+### Fixed
+
+- **A branch of a company that already existed** is no longer NEW_COMPANY (new
+  dbt test `assert_filial_de_empresa_existente_fora_dos_eventos`).
+- **The reserve model also runs when the text is rejected** twice by the
+  validator, not only on provider errors.
+- **The "ICP" acronym is out of reader-facing text:** digest header ("Perfil de
+  busca") and AI prompt; the acronym is now a forbidden term in the reading.
+- **Fake phone numbers** (4444444444, all-equal digits) are not shown.
+- **"Contato disponível"** only appears when some contact is shown.
+- dbt warning about `seeds` without a seeds folder removed.
+
+---
+
 ## [2.5.2] — 2026-11-17
 
 Third pass on the real digest: it still showed two things a pilot office should
