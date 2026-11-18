@@ -34,7 +34,12 @@ CREATE OR REPLACE TABLE config.icp (
     peso_porte      INTEGER,
     peso_localizacao INTEGER,
     peso_capital    INTEGER,
-    peso_contexto   INTEGER
+    peso_contexto   INTEGER,
+    -- Sinais que rebaixam o score (pontos descontados; 0 = desligado).
+    pen_contador_atual      INTEGER,
+    pen_fora_da_regiao      INTEGER,
+    pen_grupo_empresarial   INTEGER,
+    limiar_compartilhamento INTEGER
 );
 
 CREATE OR REPLACE TABLE config.icp_cnae (
@@ -65,6 +70,18 @@ CREATE OR REPLACE TABLE config.icp_evento (
     icp_nome    VARCHAR,
     event_type  VARCHAR
 );
+
+-- DDDs da região-alvo (sinal fora_da_regiao). Vazio = sinal desligado.
+CREATE OR REPLACE TABLE config.icp_ddd (
+    icp_nome    VARCHAR,
+    ddd         VARCHAR
+);
+
+-- Trechos de domínio de e-mail que denunciam escritório de contabilidade.
+CREATE OR REPLACE TABLE config.icp_padrao_contador (
+    icp_nome    VARCHAR,
+    padrao      VARCHAR
+);
 """
 
 
@@ -80,15 +97,30 @@ def carregar() -> None:
         icp = yaml.safe_load(caminho.read_text(encoding="utf-8"))
         nome = icp["nome"]
         pesos = icp.get("pesos", {})
+        # ICP sem a seção `sinais` continua válido: nenhum sinal rebaixa o score.
+        sinais = icp.get("sinais", {}) or {}
+        contador = sinais.get("contador_atual", {}) or {}
 
         con.execute(
-            "INSERT INTO config.icp VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO config.icp VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [nome, icp.get("descricao", "").strip(), icp.get("oferta", ""),
              icp.get("recencia_dias", 45), icp.get("score_minimo", 0),
              pesos.get("recencia", 30), pesos.get("cnae", 25),
              pesos.get("porte", 15), pesos.get("localizacao", 10),
-             pesos.get("capital", 10), pesos.get("contexto", 10)],
+             pesos.get("capital", 10), pesos.get("contexto", 10),
+             int(contador.get("penalidade", 0)),
+             int((sinais.get("fora_da_regiao", {}) or {}).get("penalidade", 0)),
+             int((sinais.get("grupo_empresarial", {}) or {}).get("penalidade", 0)),
+             int(contador.get("limiar_compartilhamento", 5))],
         )
+
+        for ddd in icp.get("geografia", {}).get("ddd", []) or []:
+            con.execute("INSERT INTO config.icp_ddd VALUES (?,?)",
+                        [nome, str(ddd).zfill(2)])
+
+        for padrao in contador.get("padroes_dominio", []) or []:
+            con.execute("INSERT INTO config.icp_padrao_contador VALUES (?,?)",
+                        [nome, str(padrao).lower()])
 
         cnae = icp.get("cnae", {})
         for prioridade in ("primarios", "secundarios", "excluidos"):

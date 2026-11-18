@@ -72,12 +72,15 @@ PORTES = ["01", "03", "05"]
 
 def _linha_estabelecimento(cnpj_basico: str, cnae: str, municipio: str,
                            uf: str, dt_inicio: str, situacao: str,
-                           fantasia: str) -> str:
+                           fantasia: str, *, ordem: str = "0001",
+                           matriz_filial: str = "1", ddd: str = "35",
+                           fone: str | None = None,
+                           email: str | None = None) -> str:
     cols = [""] * 30
     cols[0] = cnpj_basico
-    cols[1] = "0001"
+    cols[1] = ordem
     cols[2] = "99"
-    cols[3] = "1"
+    cols[3] = matriz_filial
     cols[4] = fantasia
     cols[5] = situacao
     cols[6] = dt_inicio
@@ -91,9 +94,12 @@ def _linha_estabelecimento(cnpj_basico: str, cnae: str, municipio: str,
     cols[18] = "37000000"
     cols[19] = uf
     cols[20] = municipio
-    cols[21] = "35"
-    cols[22] = f"3{random.randint(1000000, 9999999)}"
-    cols[27] = f"contato{cnpj_basico[:4]}@exemplo.com.br"
+    cols[21] = ddd
+    cols[22] = fone if fone is not None else f"3{random.randint(1000000, 9999999)}"
+    # Domínio ÚNICO por empresa: o sinal "contador atual" conta quantas
+    # empresas compartilham o mesmo domínio; um domínio comum a toda a base
+    # sintética marcaria todas como cliente de contador.
+    cols[27] = email if email is not None else f"contato@emp{cnpj_basico}.com.br"
     return ";".join(f'"{c}"' for c in cols)
 
 
@@ -124,7 +130,10 @@ def gerar(competencia: str, cnpjs: list[dict], ref: date) -> None:
     for c in cnpjs:
         est.append(_linha_estabelecimento(
             c["cnpj_basico"], c["cnae"], c["municipio"], c["uf"],
-            c["dt_inicio"], c["situacao"], c["fantasia"]))
+            c["dt_inicio"], c["situacao"], c["fantasia"],
+            ordem=c.get("ordem", "0001"),
+            matriz_filial=c.get("matriz_filial", "1"),
+            ddd=c.get("ddd", "35"), fone=c.get("fone"), email=c.get("email")))
         emp.append(_linha_empresa(
             c["cnpj_basico"], c["razao"], c["porte"], c["capital"]))
 
@@ -141,6 +150,50 @@ def gerar(competencia: str, cnpjs: list[dict], ref: date) -> None:
     _zipar(destino / "Municipios.zip", "F.K03200$Z.D60808.MUNICCSV",
            [f'"{c}";"{d}"' for c, d in MUNICIPIOS])
     print(f"  {competencia}: {len(cnpjs)} estabelecimentos, {len(cnpjs)} empresas")
+
+
+# Marca nas razões sociais dos casos de sinais. O teste dbt
+# assert_sinais_fixtures só olha para linhas com esta marca, então não faz
+# nada contra dado real da Receita.
+MARCA_FIXTURE = "FIXTURE SINTETICO"
+
+
+def casos_sinais(hoje: date) -> list[dict]:
+    """17 empresas NOVAS, todas aderentes ao ICP (Varginha, CNAE 5611201, ME),
+    que diferem só no sinal que cada uma deve (ou não) disparar.
+
+    Todas com a mesma data de abertura (hoje - 10 dias) e volume >= 10 eventos
+    naquele dia: a âncora de recência deve cair nele, não no fim da competência.
+    """
+    dt = (hoje - timedelta(days=10)).strftime("%Y%m%d")
+
+    def caso(n: int, nome: str, **extra) -> dict:
+        return {
+            "cnpj_basico": f"{90000000 + n:08d}", "cnae": "5611201",
+            "municipio": "5403", "uf": "MG", "dt_inicio": dt, "situacao": "02",
+            "razao": f"ALPHA {MARCA_FIXTURE} {n:02d} {nome}",
+            "fantasia": f"CASO{n:02d}", "porte": "01", "capital": "10000,00",
+            **extra,
+        }
+
+    casos = [
+        caso(1, "LIMPO LTDA"),
+        caso(2, "PADRAO LTDA", email="abertura@escritoriocontab.com.br"),
+    ]
+    # 5 empresas com o mesmo domínio corporativo: intermediário.
+    casos += [caso(2 + i, f"DOMINIO{i} LTDA", email=f"cliente{i}@bpofiscal.com.br")
+              for i in range(1, 6)]
+    casos += [
+        caso(8, "FILIAL LTDA", ordem="0002", matriz_filial="2"),
+        caso(9, "EMPREENDIMENTOS SPE LTDA"),
+        caso(10, "DDD LTDA", ddd="11", fone="987654321"),
+        caso(11, "FONE LTDA", ddd="35", fone="99999999"),
+    ]
+    # 5 empresas com o MESMO endereço de provedor gratuito: intermediário.
+    casos += [caso(11 + i, f"GMAIL{i} LTDA", email="intermediario@gmail.com")
+              for i in range(1, 6)]
+    casos += [caso(17, "GMAILUNICO LTDA", email="alguem@gmail.com")]
+    return casos
 
 
 def main() -> None:
@@ -194,9 +247,11 @@ def main() -> None:
 
     # A competência atual = as antigas + um bloco de empresas realmente novas.
     novas = [_fabricar(args.base + i, nova=True) for i in range(1, args.novas + 1)]
+    novas += casos_sinais(hoje)
     gerar(args.atual, antigas + novas, hoje)
 
-    print(f"\nOK. {args.novas} empresas existem apenas em {args.atual} — "
+    print(f"\nOK. {args.novas + len(casos_sinais(hoje))} empresas existem apenas em "
+          f"{args.atual} ({len(casos_sinais(hoje))} são casos de sinais) — "
           f"são elas que o diff deve detectar como NEW_COMPANY.")
     print(f"Arquivos em: {RAW}")
 

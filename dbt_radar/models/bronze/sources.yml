@@ -24,3 +24,5 @@ sources:
       - name: icp_porte
       - name: icp_uf
       - name: icp_evento
+      - name: icp_ddd
+      - name: icp_padrao_contador

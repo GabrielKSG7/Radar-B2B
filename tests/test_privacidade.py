@@ -109,3 +109,27 @@ def test_digest_nao_vaza_dados_de_individuo(tmp_path, monkeypatch):
     assert "## Empresários individuais (1)" in md
     assert "Studio Bela" in md                           # fantasia comercial é mantida
     assert "M. A. S." in csv_txt
+
+
+def test_digest_informa_ate_quando_vao_os_dados_da_receita(tmp_path, monkeypatch):
+    """A idade dos eventos é medida contra a âncora; o leitor precisa vê-la."""
+    caminho = _banco(tmp_path)
+    con = duckdb.connect(str(caminho))
+    con.execute("ALTER TABLE main_gold.gld_opportunities "
+                "ADD COLUMN data_ancora_recencia DATE")
+    con.execute("UPDATE main_gold.gld_opportunities "
+                "SET data_ancora_recencia = DATE '2026-11-15'")
+    con.close()
+    monkeypatch.setattr(digest, "DB_PATH", caminho)
+    monkeypatch.setattr(digest, "DIGEST_DIR", tmp_path / "digests")
+
+    md = open(digest.gerar()[0], encoding="utf-8").read()
+    assert "**Dados da Receita até:** 2026-11-15" in md
+
+
+def test_digest_sem_ancora_nao_quebra(tmp_path, monkeypatch):
+    """Banco gerado antes da 2.5.0 não tem a coluna: o cabeçalho só omite a linha."""
+    monkeypatch.setattr(digest, "DB_PATH", _banco(tmp_path))
+    monkeypatch.setattr(digest, "DIGEST_DIR", tmp_path / "digests")
+    md = open(digest.gerar()[0], encoding="utf-8").read()
+    assert "Dados da Receita até" not in md

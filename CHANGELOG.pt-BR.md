@@ -6,6 +6,64 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.5.0] — 2026-11-17
+
+Score guiado pelo que o primeiro digest com dado real mostrou: recência ancorada
+no fim real do snapshot da Receita e três sinais que rebaixam leads que um
+escritório de contabilidade não deveria perseguir.
+
+### Corrigido
+
+- **Âncora de recência.** A Receita publica o snapshot no meio do mês: o de
+  2026-11 termina em 15/11 (17 eventos naquele domingo contra ~500 num
+  domingo comum), mas a idade era medida contra 30/11, então toda empresa
+  parecia ~15 dias mais velha e o score de recência saía achatado. A âncora
+  (CTE `ancora` em `gld_icp_matches`) passa a ser o último dia com volume real
+  de eventos (`ancora_min_eventos`, padrão 10), limitada ao fim da competência;
+  com poucos eventos, cai para o maior `event_date`, e sem datas para o fim da
+  competência (comportamento anterior). Continua idempotente.
+- Os pontos de contato só contam contato **válido**: telefone como 4444444444
+  ou e-mail sem forma de e-mail deixam de pontuar como "acionável".
+
+### Adicionado
+
+- Três ajustes negativos, configurados no ICP (`sinais`) e persistidos em
+  `score_fatores` (`ajuste_contador`, `ajuste_regiao`, `ajuste_grupo`); o score
+  é a soma de fatores e ajustes, limitada a [0, 100]:
+  - **Provável contador atual** (-30): o domínio do e-mail contém `contab` ou
+    `contador`, ou o mesmo endereço (provedor gratuito) / domínio (corporativo)
+    é usado por 5 ou mais empresas na competência — o e-mail cadastrado na
+    Receita costuma ser o do escritório que abriu a empresa.
+  - **DDD fora da região** (-10): telefone válido com DDD que não está em
+    `geografia.ddd`.
+  - **Grupo empresarial** (-20): filial (ordem do CNPJ diferente de 0001) ou SPE.
+- Colunas de evidência no Gold (`sinal_*`, `n_empresas_contato`,
+  `data_ancora_recencia`) e o texto da explicação lista cada ajuste.
+- O cabeçalho do digest informa "Dados da Receita até <data>".
+- `scripts/auditar_sinais.py`: quantos candidatos cada sinal atinge, quantos
+  saíram do digest por causa dos descontos e quais domínios dispararam o sinal
+  de compartilhamento (só domínios, nunca o endereço completo).
+- 17 casos sintéticos em `scripts/gerar_fixtures.py` (um por sinal, mais
+  controles) e o teste dbt `assert_sinais_fixtures`, que só olha para linhas
+  marcadas `FIXTURE SINTETICO` e por isso passa contra dado real. 6 testes
+  Python novos.
+
+### Alterado
+
+- `assert_score_bate_com_fatores` passa a incluir os três ajustes.
+- Os e-mails sintéticos usam um domínio por empresa (um domínio comum marcaria
+  toda a base sintética como cliente de contador).
+
+### Observações
+
+- Pesos, padrões e limiar de compartilhamento são hipóteses iniciais: rode
+  `python scripts/auditar_sinais.py` com dado real e ajuste o YAML. Suba o
+  limiar se grupos legítimos estiverem sendo marcados.
+- Rode o pipeline completo uma vez após atualizar: `config.icp` ganhou colunas
+  e tabelas, carregadas por `scripts/carregar_icp.py` (já parte do pipeline).
+
+---
+
 ## [2.4.2] — 2026-11-17
 
 Correção do CI: os testes importam `src` sem depender da ordem de execução.

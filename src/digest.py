@@ -196,6 +196,9 @@ def gerar(top: int | None = None) -> tuple[str, int]:
         return "", 0
 
     competencia = linhas[0].get("source_competence")
+    # A Receita publica o snapshot no meio do mês: a idade dos eventos é medida
+    # contra o último dia com volume real, e o leitor precisa saber qual é.
+    ancora = linhas[0].get("data_ancora_recencia")
     icp = linhas[0].get("icp_nome")
     hoje = datetime.now().strftime("%Y-%m-%d")
 
@@ -213,6 +216,7 @@ def gerar(top: int | None = None) -> tuple[str, int]:
           f"**Data:** {hoje}  ",
           f"**Perfil (ICP):** {icp}  ",
           f"**Competência analisada:** {competencia}  ",
+          *([f"**Dados da Receita até:** {ancora}  "] if ancora else []),
           f"**Oportunidades:** {len(linhas)} — empresas {len(empresas)} "
           f"(alta {len(por_faixa['Alta'])} · média {len(por_faixa['Média'])} "
           f"· baixa {len(por_faixa['Baixa'])}) · "

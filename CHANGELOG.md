@@ -6,6 +6,64 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.5.0] — 2026-11-17
+
+Score driven by what the first real-data digest showed: recency anchored on the
+real end of the Receita snapshot, and three signals that lower the score of
+leads an accounting office should not chase.
+
+### Fixed
+
+- **Recency anchor.** The Receita publishes the snapshot mid-month: 2026-11
+  ends on 15/11 (17 events on that Sunday against ~500 on a normal one), but
+  age was measured against 30/11, so every company looked ~15 days older than
+  it is and the recency score was flattened. The anchor (`ancora` CTE in
+  `gld_icp_matches`) is now the last day with real event volume
+  (`ancora_min_eventos`, default 10), capped at the end of the competence;
+  with too few events it falls back to the latest `event_date`, and without
+  dates to the end of the competence (previous behaviour). Still idempotent.
+- Contact points only count a **valid** contact: a phone like 4444444444 or an
+  e-mail without e-mail shape no longer scores as "actionable".
+
+### Added
+
+- Three negative adjustments, configured in the ICP (`sinais`) and persisted in
+  `score_fatores` (`ajuste_contador`, `ajuste_regiao`, `ajuste_grupo`); the
+  score is the sum of factors and adjustments, clamped to [0, 100]:
+  - **Likely current accountant** (-30): the e-mail domain contains `contab` or
+    `contador`, or the same address (free provider) / domain (corporate) is
+    used by 5+ companies in the competence — the e-mail on the Receita
+    register is usually the office that opened the company.
+  - **Phone area code outside the region** (-10): valid phone whose DDD is not
+    in `geografia.ddd`.
+  - **Group company** (-20): branch (CNPJ order other than 0001) or SPE.
+- Evidence columns in Gold (`sinal_*`, `n_empresas_contato`,
+  `data_ancora_recencia`) and the explanation text lists each adjustment.
+- The digest header states "Dados da Receita até <date>".
+- `scripts/auditar_sinais.py`: how many candidates each signal hits, how many
+  left the digest because of the discounts, and which domains triggered the
+  sharing signal (domains only, never full addresses).
+- 17 synthetic cases in `scripts/gerar_fixtures.py` (one per signal, plus
+  controls) and the dbt test `assert_sinais_fixtures`, which only looks at rows
+  tagged `FIXTURE SINTETICO` and therefore passes against real data. 6 new
+  Python tests.
+
+### Changed
+
+- `assert_score_bate_com_fatores` now includes the three adjustments.
+- Synthetic e-mails use one domain per company (a shared domain would flag the
+  whole synthetic base as accountant clients).
+
+### Notes
+
+- Weights, patterns and the sharing threshold are initial hypotheses: run
+  `python scripts/auditar_sinais.py` on real data and adjust the YAML. Raise
+  the sharing threshold if legitimate groups are being flagged.
+- Run the full pipeline once after upgrading: `config.icp` gained columns and
+  tables, loaded by `scripts/carregar_icp.py` (already part of the pipeline).
+
+---
+
 ## [2.4.2] — 2026-11-17
 
 CI fix: tests import `src` without depending on test order.

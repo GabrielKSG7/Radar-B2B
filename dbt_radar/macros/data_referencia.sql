@@ -17,6 +17,11 @@
 
   Convenção: a referência é o ÚLTIMO dia da competência — o instante em que a
   fotografia daquele mês está completa.
+
+  ATENÇÃO (2.5.0): para RECÊNCIA, esta macro virou só o TETO e o fallback. A
+  Receita publica o snapshot no meio do mês (o de 2026-11 termina em 15/11),
+  então a idade dos eventos é medida contra o último dia com volume real de
+  eventos — ver o CTE `ancora` em gld_icp_matches.sql.
 #}
 {% macro data_referencia(competencia=none) %}
     (

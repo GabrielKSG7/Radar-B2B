@@ -14,6 +14,10 @@ oferta: "Contabilidade e BPO financeiro para empresas em início de operação"
 geografia:
   uf: [MG]
   municipios: [VARGINHA, TRES CORACOES, ELOI MENDES]
+  # DDDs de Minas Gerais. Telefone com DDD fora da lista indica, em geral,
+  # matriz ou grupo em outro estado (ver sinais.fora_da_regiao). Lista vazia
+  # desliga o sinal.
+  ddd: [31, 32, 33, 34, 35, 37, 38]
 
 # ATENÇÃO: casamos por CÓDIGO CNAE, nunca por texto da descrição.
 # A versão anterior usava `ilike '%ti%'`, que casa com "A-TI-vidades" —
@@ -53,3 +57,25 @@ pesos:
   contexto: 10
 
 score_minimo: 40           # abaixo disso não entra no digest
+
+# Sinais que REBAIXAM o score (pontos descontados; 0 desliga o sinal).
+# Nascem da revisão do primeiro digest com dados reais (CHANGELOG 2.5.0): um
+# escritório de contabilidade perde tempo abordando quem já tem contador ou
+# quem decide em outra cidade. Hipóteses iniciais; calibrar com o feedback.
+sinais:
+  # E-mail cadastrado na Receita costuma ser o do escritório que abriu a
+  # empresa. Dois indícios, qualquer um basta:
+  #   (a) o domínio do e-mail contém um dos padrões abaixo;
+  #   (b) o mesmo e-mail (provedor gratuito) ou domínio (corporativo) aparece
+  #       em `limiar_compartilhamento` ou mais empresas da base.
+  contador_atual:
+    penalidade: 30
+    limiar_compartilhamento: 5
+    padroes_dominio: [contab, contador]
+  # Telefone válido com DDD fora de geografia.ddd.
+  fora_da_regiao:
+    penalidade: 10
+  # Filial (CNPJ com ordem diferente de 0001) ou SPE: a decisão contábil
+  # costuma ficar na matriz ou no grupo.
+  grupo_empresarial:
+    penalidade: 20

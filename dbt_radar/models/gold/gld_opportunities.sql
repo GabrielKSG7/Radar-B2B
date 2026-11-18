@@ -13,6 +13,11 @@
     - agora: seis fatores, cada um com peso vindo do ICP, somando até 100.
     - agora: os fatores são persistidos em JSON (score_fatores), permitindo
       auditar, recalibrar e explicar sem reprocessar.
+
+  Três AJUSTES NEGATIVOS (2.5.0), também vindos do ICP e também persistidos em
+  score_fatores: provável contador atual, DDD fora da região e grupo
+  empresarial (filial/SPE). O score é a soma dos fatores e dos ajustes,
+  limitada a [0, 100].
 */
 
 with matches as (
@@ -58,11 +63,21 @@ fatores as (
 
         -- 6. CONTEXTO — completude do cadastro. Um lead com e-mail e
         --    telefone é acionável hoje; sem contato, exige garimpo.
+        --    Só conta contato VÁLIDO: telefone 4444444444 ou e-mail sem forma
+        --    de e-mail não deixam o lead acionável.
         (
-            case when m.email    is not null then round(m.peso_contexto * 0.4)::int else 0 end
-          + case when m.telefone is not null then round(m.peso_contexto * 0.4)::int else 0 end
-          + case when m.confidence = 'alta'  then round(m.peso_contexto * 0.2)::int else 0 end
-        )                                               as pts_contexto
+            case when m.email_valido     then round(m.peso_contexto * 0.4)::int else 0 end
+          + case when m.telefone_valido  then round(m.peso_contexto * 0.4)::int else 0 end
+          + case when m.confidence = 'alta' then round(m.peso_contexto * 0.2)::int else 0 end
+        )                                               as pts_contexto,
+
+        -- AJUSTES NEGATIVOS (pontos descontados, vindos do ICP).
+        case when m.sinal_contador_atual
+             then -m.pen_contador_atual else 0 end      as aj_contador,
+        case when m.sinal_fora_da_regiao
+             then -m.pen_fora_da_regiao else 0 end      as aj_regiao,
+        case when m.sinal_grupo_empresarial
+             then -m.pen_grupo_empresarial else 0 end   as aj_grupo
 
     from matches m
 ),
@@ -70,10 +85,11 @@ fatores as (
 pontuado as (
     select
         *,
-        least(100,
+        least(100, greatest(0,
             pts_recencia + pts_cnae + pts_porte
           + pts_localizacao + pts_capital + pts_contexto
-        )                                               as opportunity_score
+          + aj_contador + aj_regiao + aj_grupo
+        ))                                              as opportunity_score
     from fatores
 )
 
@@ -100,7 +116,15 @@ select
     email,
     telefone,
     dias_desde_evento,
+    data_ancora_recencia,
     cnae_prioridade,
+
+    -- Evidências dos ajustes (para auditar e calibrar com o feedback).
+    sinal_contador_atual,
+    contador_por_padrao,
+    n_empresas_contato,
+    sinal_fora_da_regiao,
+    sinal_grupo_empresarial,
 
     opportunity_score,
 
@@ -111,7 +135,10 @@ select
         'porte',        pts_porte,
         'localizacao',  pts_localizacao,
         'capital',      pts_capital,
-        'contexto',     pts_contexto
+        'contexto',     pts_contexto,
+        'ajuste_contador', aj_contador,
+        'ajuste_regiao',   aj_regiao,
+        'ajuste_grupo',    aj_grupo
     )                                                   as score_fatores,
 
     -- Texto derivado dos fatores (nunca escrito à mão em outro lugar).
@@ -121,7 +148,18 @@ select
         case when pts_porte > 0 then porte_descricao || ' (+' || pts_porte || ')' end,
         case when pts_localizacao > 0 then municipio_nome || ' (+' || pts_localizacao || ')' end,
         case when pts_capital > 0 then 'Capital social (+' || pts_capital || ')' end,
-        case when pts_contexto > 0 then 'Contato disponível (+' || pts_contexto || ')' end
+        case when pts_contexto > 0 then 'Contato disponível (+' || pts_contexto || ')' end,
+        case when aj_contador < 0 then
+            'Provável contador atual (' || aj_contador || ': '
+            || case when contador_por_padrao
+                    then 'domínio de e-mail de contabilidade'
+                    else 'e-mail compartilhado com ' || n_empresas_contato || ' empresas' end
+            || ')' end,
+        case when aj_regiao < 0 then 'DDD fora da região (' || aj_regiao || ')' end,
+        case when aj_grupo < 0 then
+            case when sinal_filial and sinal_spe then 'Filial e SPE'
+                 when sinal_filial then 'Filial' else 'SPE' end
+            || ' — decisão contábil provavelmente fora da empresa (' || aj_grupo || ')' end
     )                                                   as score_explanation,
 
     current_timestamp                                   as scored_at
