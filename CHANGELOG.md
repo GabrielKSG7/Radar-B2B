@@ -6,6 +6,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.4.2] — 2026-11-17
+
+CI fix: tests import `src` without depending on test order.
+
+### Fixed
+
+- CI (`pytest` plain) failed collecting `tests/test_download_retomada.py` with
+  `No module named 'src'`: only `test_pipeline.py` put the project root on
+  `sys.path`, and pytest collects alphabetically, so the new test ran first.
+  Locally it passed because `python -m pytest` adds the current directory.
+  `pythonpath = ["."]` in `[tool.pytest.ini_options]` makes it explicit for
+  every test file.
+
+---
+
 ## [2.4.1] — 2026-11-17
 
 Resumable downloads: the Receita server drops long connections mid-body.

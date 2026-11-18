@@ -6,6 +6,21 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.4.2] — 2026-11-17
+
+Correção do CI: os testes importam `src` sem depender da ordem de execução.
+
+### Corrigido
+
+- O CI (`pytest` puro) falhava ao coletar `tests/test_download_retomada.py`
+  com `No module named 'src'`: só o `test_pipeline.py` colocava a raiz do
+  projeto no `sys.path`, e o pytest coleta em ordem alfabética, então o teste
+  novo rodava primeiro. Localmente passava porque `python -m pytest` inclui o
+  diretório atual. `pythonpath = ["."]` em `[tool.pytest.ini_options]` torna
+  isso explícito para todos os arquivos de teste.
+
+---
+
 ## [2.4.1] — 2026-11-17
 
 Download retomável: o servidor da Receita derruba conexões longas no meio do corpo.

@@ -1,6 +1,6 @@
 [project]
 name = "radar-b2b"
-version = "2.4.1"
+version = "2.4.2"
 description = "Motor de eventos e oportunidades B2B sobre a base pública de CNPJ"
 requires-python = ">=3.10"
 dependencies = [
@@ -26,3 +26,4 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # `pytest` puro (CI) não põe a raiz no sys.path; `python -m pytest` põe
