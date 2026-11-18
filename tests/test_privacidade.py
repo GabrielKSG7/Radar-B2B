@@ -133,3 +133,98 @@ def test_digest_sem_ancora_nao_quebra(tmp_path, monkeypatch):
     monkeypatch.setattr(digest, "DIGEST_DIR", tmp_path / "digests")
     md = open(digest.gerar()[0], encoding="utf-8").read()
     assert "Dados da Receita até" not in md
+
+
+# ------------------------------------------------------------------- v2.5.1
+def _insere(caminho, **campos):
+    """Segunda empresa (LTDA) com e-mail pessoal, fatores e explicação de contato."""
+    base = {
+        "event_id": "e3", "cnpj": "33333333000193", "razao_social": "BETA COMERCIO LTDA",
+        "nome_fantasia": "Beta", "natureza_juridica": "2062", "capital_social": 20000,
+        "email": "guilherme.beta@gmail.com", "telefone": "3533334444",
+        "opportunity_score": 75,
+        "score_fatores": '{"recencia": 27, "cnae": 25, "ajuste_regiao": -10}',
+        "score_explanation": "Aberta há 4 dias (+27) · Contato disponível (+10)",
+    }
+    base.update(campos)
+    con = duckdb.connect(str(caminho))
+    con.execute(
+        "INSERT INTO main_gold.gld_opportunities VALUES (?,?,'NEW_COMPANY',"
+        "'2026-11-11','2026-11','icp',?,?,'VARGINHA','MG','5611201','Restaurantes',"
+        "'Micro Empresa',?,?,?,?,4,?,?,?)",
+        [base["event_id"], base["cnpj"], base["razao_social"], base["nome_fantasia"],
+         base["natureza_juridica"], base["capital_social"], base["email"],
+         base["telefone"], base["opportunity_score"], base["score_fatores"],
+         base["score_explanation"]])
+    con.close()
+
+
+def _gerar(tmp_path, monkeypatch, **campos):
+    caminho = _banco(tmp_path)
+    _insere(caminho, **campos)
+    monkeypatch.setattr(digest, "DB_PATH", caminho)
+    monkeypatch.setattr(digest, "DIGEST_DIR", tmp_path / "digests")
+    md = open(digest.gerar()[0], encoding="utf-8").read()
+    csv_txt = next((tmp_path / "digests").glob("radar_piloto_*.csv")).read_text(
+        encoding="utf-8-sig")
+    return md, csv_txt
+
+
+def test_email_pessoal_de_empresa_e_omitido_mas_telefone_fica(tmp_path, monkeypatch):
+    md, csv_txt = _gerar(tmp_path, monkeypatch)
+    for texto in (md, csv_txt):
+        assert "guilherme.beta@gmail.com" not in texto
+        assert "e-mail pessoal omitido" in texto
+        assert "3533334444" in texto                       # telefone segue
+    assert "contato@acme.com" in md                        # e-mail corporativo segue
+
+
+def test_email_pessoal_volta_com_a_chave_desligada(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADAR_OCULTAR_EMAIL_PESSOAL", "0")
+    md, _ = _gerar(tmp_path, monkeypatch)
+    assert "guilherme.beta@gmail.com" in md
+
+
+def test_fatores_negativos_nao_saem_como_mais_menos(tmp_path, monkeypatch):
+    md, _ = _gerar(tmp_path, monkeypatch)
+    assert "ajuste_regiao -10" in md and "recencia +27" in md
+    assert "+-" not in md
+
+
+def test_csv_usa_virgula_decimal_no_capital(tmp_path, monkeypatch):
+    _, csv_txt = _gerar(tmp_path, monkeypatch)
+    linhas = [linha.split(";") for linha in csv_txt.splitlines()]
+    cab = linhas[0]
+    beta = next(linha for linha in linhas if "BETA COMERCIO LTDA" in linha)
+    assert beta[cab.index("capital_social")] == "20000,00"
+    assert "20000.0" not in csv_txt
+
+
+def test_individuo_nao_diz_contato_disponivel_com_contato_omitido(
+        tmp_path, monkeypatch):
+    caminho = _banco(tmp_path)
+    con = duckdb.connect(str(caminho))
+    con.execute("UPDATE main_gold.gld_opportunities SET score_explanation = "
+                "'Aberta há 8 dias (+25) · Contato disponível (+10)' "
+                "WHERE event_id = 'e2'")
+    con.close()
+    monkeypatch.setattr(digest, "DB_PATH", caminho)
+    monkeypatch.setattr(digest, "DIGEST_DIR", tmp_path / "digests")
+    digest.gerar()
+    csv_txt = next((tmp_path / "digests").glob("radar_piloto_*.csv")).read_text(
+        encoding="utf-8-sig")
+    linha = next(linha for linha in csv_txt.splitlines() if "22222222000192" in linha)
+    assert "Contato disponível" not in linha
+    assert "contato omitido no piloto" in linha
+
+
+def test_lista_de_provedores_pessoais_bate_com_a_do_dbt():
+    """Python (digest) e SQL (sinal de compartilhamento) usam a mesma lista."""
+    import re
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parent.parent / "dbt_radar" / "models" / "gold"
+           / "gld_icp_matches.sql").read_text(encoding="utf-8")
+    bloco = sql[sql.index("provedores_livres as ("):]
+    bloco = bloco[:bloco.index("]) as dominio")]
+    assert set(re.findall(r"'([a-z0-9.\-]+)'", bloco)) == privacidade.PROVEDORES_PESSOAIS

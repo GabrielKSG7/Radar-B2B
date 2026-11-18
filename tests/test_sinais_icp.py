@@ -30,12 +30,14 @@ def test_sinais_do_yaml_viram_colunas_e_tabelas(tmp_path, monkeypatch):
         "geografia:\n  municipios: [VARGINHA]\n  ddd: [35, 31]\n"
         "sinais:\n"
         "  contador_atual:\n    penalidade: 30\n    limiar_compartilhamento: 7\n"
+        "    limiar_dominio_intermediario: 40\n"
         "    padroes_dominio: [Contab, contador]\n"
         "  fora_da_regiao:\n    penalidade: 10\n"
         "  grupo_empresarial:\n    penalidade: 20\n"))
     assert con.execute(
         "SELECT pen_contador_atual, pen_fora_da_regiao, pen_grupo_empresarial,"
-        " limiar_compartilhamento FROM config.icp").fetchall() == [(30, 10, 20, 7)]
+        " limiar_compartilhamento, limiar_dominio_intermediario FROM config.icp"
+    ).fetchall() == [(30, 10, 20, 7, 40)]
     assert con.execute("SELECT ddd FROM config.icp_ddd ORDER BY ddd").fetchall() \
         == [("31",), ("35",)]
     # padrões em minúsculas: o SQL compara com o domínio já em minúsculas
@@ -47,8 +49,8 @@ def test_icp_sem_secao_sinais_nao_rebaixa_nada(tmp_path, monkeypatch):
     """ICP antigo (sem `sinais`) continua válido: penalidades 0, sem DDD."""
     con = _carregar(tmp_path, monkeypatch, BASE)
     assert con.execute(
-        "SELECT pen_contador_atual, pen_fora_da_regiao, pen_grupo_empresarial"
-        " FROM config.icp").fetchall() == [(0, 0, 0)]
+        "SELECT pen_contador_atual, pen_fora_da_regiao, pen_grupo_empresarial,"
+        " limiar_dominio_intermediario FROM config.icp").fetchall() == [(0, 0, 0, 0)]
     assert con.execute("SELECT count(*) FROM config.icp_ddd").fetchall() == [(0,)]
     assert con.execute("SELECT count(*) FROM config.icp_padrao_contador"
                        ).fetchall() == [(0,)]
@@ -64,6 +66,10 @@ def test_yaml_do_projeto_declara_os_tres_sinais():
     assert sinais["contador_atual"]["penalidade"] > 0
     assert sinais["fora_da_regiao"]["penalidade"] > 0
     assert sinais["grupo_empresarial"]["penalidade"] > 0
+    # sem este limiar, domínio de plataforma com centenas de empresas viraria
+    # "grupo" (-20) em vez de contador (-30)
+    assert sinais["contador_atual"]["limiar_dominio_intermediario"] > \
+        sinais["contador_atual"]["limiar_compartilhamento"]
     assert icp["geografia"]["ddd"], "sem DDD o sinal fora_da_regiao fica desligado"
     # sem penalidade o sinal não pode empurrar o score para fora de [0, 100]
     pesos = sum(icp["pesos"].values())
@@ -76,12 +82,12 @@ def test_auditar_sinais_conta_e_lista_so_dominios(tmp_path):
     con = duckdb.connect(str(tmp_path / "a.duckdb"))
     con.execute("CREATE SCHEMA main_gold")
     con.execute("""CREATE TABLE main_gold.gld_icp_matches AS SELECT * FROM (VALUES
-        (true,  true,  false, 1,  'escritoriocontab.com.br', false, false, false, true,  true),
-        (true,  false, true,  9,  'bpofiscal.com.br',        false, true,  false, true,  false),
-        (false, false, false, 1,  'emp1.com.br',             false, false, true,  false, true)
+        (true,  true,  false, false, 1,  'escritoriocontab.com.br', false, false, false, true,  true),
+        (true,  false, true,  false, 9,  'bpofiscal.com.br',        false, true,  false, true,  false),
+        (false, false, false, true,  6,  'lojas.com.br',            false, false, true,  false, true)
     ) t(sinal_contador_atual, contador_por_padrao, contador_por_compartilhamento,
-        n_empresas_contato, email_dominio, sinal_fora_da_regiao, sinal_filial,
-        sinal_spe, email_valido, telefone_valido)""")
+        grupo_por_dominio, n_empresas_contato, email_dominio, sinal_fora_da_regiao,
+        sinal_filial, sinal_spe, email_valido, telefone_valido)""")
     con.execute("CREATE TABLE main_gold.gld_opportunities AS "
                 "SELECT 1 AS event_id UNION ALL SELECT 2")
 
@@ -90,3 +96,5 @@ def test_auditar_sinais_conta_e_lista_so_dominios(tmp_path):
     assert r["contador_atual"] == 2 and r["contador_por_padrao"] == 1
     assert r["filial"] == 1 and r["spe"] == 1 and r["sem_email_valido"] == 1
     assert r["dominios_compartilhados"] == [("bpofiscal.com.br", 9, 1)]
+    assert r["grupo_por_dominio"] == 1
+    assert r["dominios_de_grupo"] == [("lojas.com.br", 6, 1)]

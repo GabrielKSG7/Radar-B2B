@@ -6,6 +6,62 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.5.1] — 2026-11-17
+
+Segunda passada no primeiro digest com dado real: menos falsos "contador
+atual", texto de IA que segue as regras do prompt e um enriquecimento que
+aguenta provedor sobrecarregado.
+
+### Corrigido
+
+- **`gmail.com.br` e `.edu.br` deixam de parecer intermediários.**
+  `gmail.com.br` (erro de digitação comum) agora é provedor gratuito: só vale o
+  mesmo *endereço*. Domínio educacional compartilhado é a instituição, não um
+  escritório, e não gera sinal de compartilhamento.
+- **Domínio corporativo compartilhado não é mais sempre "contador atual".**
+  De 5 a 49 empresas no mesmo domínio (um grupo de lojas, por exemplo) vira
+  "provável grupo empresarial" (-20); 50 ou mais (plataforma ou escritório)
+  continua "contador atual" (-30). A explicação diz "domínio", não "e-mail", e
+  o limite é `sinais.contador_atual.limiar_dominio_intermediario`.
+- **Fatores do score saem com o sinal certo** (`ajuste_regiao -10`, não `+-10`).
+- **Capital no CSV com vírgula decimal** (`20000,00`), para o Excel ler como
+  número.
+- **Individuais protegidos não dizem mais "Contato disponível"** no CSV com o
+  contato oculto.
+- `src/radar_b2b.egg-info` deixa de ser versionado (aparecia como modificado
+  depois de todo `pip install -e`); `*.egg-info/` entrou no `.gitignore`.
+
+### Alterado
+
+- **Prompt.** O modelo é avisado de que a empresa já está aberta (sem "pacote de
+  abertura"), de que não deve afirmar necessidade ou urgência como fato, nem
+  supor regime tributário, nem citar canais de contato, e de que escreve em
+  português do Brasil. Ele também vê os sinais do pipeline (contador atual,
+  grupo, telefone fora da região), nunca o e-mail ou telefone em si.
+- **Confiança calibrada.** `media` é o padrão, `alta` só se o nome confirmar o
+  CNAE; sinal de contador atual ou grupo limita a `baixa`, telefone fora da
+  região a `media`. Antes, as 15 leituras diziam `alta`.
+- **O código confere o texto.** Termos proibidos (urgência, "abertura de
+  empresa", Simples Nacional, LinkedIn, ...) geram um pedido de reescrita; a
+  segunda violação cai na heurística honesta.
+- **E-mail pessoal oculto no digest e no CSV do piloto** também para empresas
+  (Gmail, Hotmail, Outlook, ... aparecem como "e-mail pessoal omitido"); o
+  telefone e o e-mail corporativo ficam. `RADAR_OCULTAR_EMAIL_PESSOAL=0`
+  desliga. Mesma ressalva de revisão jurídica da regra dos individuais.
+- `auditar_sinais.py` também lista os domínios tratados como grupo empresarial.
+
+### Adicionado
+
+- **Retry com backoff e modelo reserva.** HTTP 429/5xx esperam 5, 15 e 45 s e
+  tentam de novo; se o modelo continuar indisponível, `RADAR_LLM_FALLBACK`
+  (opcional) assume, e o modelo realmente usado é gravado por linha.
+- **Mensagens de falha honestas.** "Verifique a chave de API" só para
+  401/403/404, que interrompem o run na hora. Muitos 503 dizem que o provedor
+  está sobrecarregado e sugerem o modelo reserva. As leituras já obtidas são
+  gravadas antes de abortar.
+- Casos sintéticos para o domínio de plataforma com 50 empresas, o domínio
+  `.edu.br` e `gmail.com.br` (20 casos em `assert_sinais_fixtures`).
+
 ## [2.5.0] — 2026-11-17
 
 Score guiado pelo que o primeiro digest com dado real mostrou: recência ancorada

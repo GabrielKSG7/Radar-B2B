@@ -122,6 +122,8 @@ select
     -- Evidências dos ajustes (para auditar e calibrar com o feedback).
     sinal_contador_atual,
     contador_por_padrao,
+    contato_provedor_livre,
+    grupo_por_dominio,
     n_empresas_contato,
     sinal_fora_da_regiao,
     sinal_grupo_empresarial,
@@ -153,13 +155,21 @@ select
             'Provável contador atual (' || aj_contador || ': '
             || case when contador_por_padrao
                     then 'domínio de e-mail de contabilidade'
-                    else 'e-mail compartilhado com ' || n_empresas_contato || ' empresas' end
+                    when contato_provedor_livre
+                    then 'e-mail compartilhado com ' || n_empresas_contato || ' empresas'
+                    else 'domínio de e-mail compartilhado com ' || n_empresas_contato
+                         || ' empresas (provável intermediário)' end
             || ')' end,
         case when aj_regiao < 0 then 'DDD fora da região (' || aj_regiao || ')' end,
         case when aj_grupo < 0 then
-            case when sinal_filial and sinal_spe then 'Filial e SPE'
-                 when sinal_filial then 'Filial' else 'SPE' end
-            || ' — decisão contábil provavelmente fora da empresa (' || aj_grupo || ')' end
+            'Provável grupo empresarial (' || aj_grupo || ': '
+            || concat_ws(' + ',
+                   case when sinal_filial then 'filial' end,
+                   case when sinal_spe then 'SPE' end,
+                   case when grupo_por_dominio
+                        then 'domínio de e-mail compartilhado com '
+                             || n_empresas_contato || ' empresas' end)
+            || ' — decisão contábil provavelmente fora da empresa)' end
     )                                                   as score_explanation,
 
     current_timestamp                                   as scored_at

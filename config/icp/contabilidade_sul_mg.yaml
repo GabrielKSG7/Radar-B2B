@@ -71,6 +71,9 @@ sinais:
   contador_atual:
     penalidade: 30
     limiar_compartilhamento: 5
+    # Mesmo domínio corporativo em >= 50 empresas: plataforma ou escritório
+    # (contador atual). Entre 5 e 49: provável grupo empresarial.
+    limiar_dominio_intermediario: 50
     padroes_dominio: [contab, contador]
   # Telefone válido com DDD fora de geografia.ddd.
   fora_da_regiao:

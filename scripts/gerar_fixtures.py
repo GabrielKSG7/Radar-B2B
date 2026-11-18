@@ -159,7 +159,7 @@ MARCA_FIXTURE = "FIXTURE SINTETICO"
 
 
 def casos_sinais(hoje: date) -> list[dict]:
-    """17 empresas NOVAS, todas aderentes ao ICP (Varginha, CNAE 5611201, ME),
+    """20 empresas NOVAS, todas aderentes ao ICP (Varginha, CNAE 5611201, ME),
     que diferem só no sinal que cada uma deve (ou não) disparar.
 
     Todas com a mesma data de abertura (hoje - 10 dias) e volume >= 10 eventos
@@ -193,7 +193,30 @@ def casos_sinais(hoje: date) -> list[dict]:
     casos += [caso(11 + i, f"GMAIL{i} LTDA", email="intermediario@gmail.com")
               for i in range(1, 6)]
     casos += [caso(17, "GMAILUNICO LTDA", email="alguem@gmail.com")]
+    # Dependem de EMAILS_DA_BASE (empresas antigas com e-mail combinado):
+    casos += [
+        # domínio corporativo em >= 50 empresas: plataforma/escritório.
+        caso(18, "PLATAFORMA LTDA", email="cliente@plataformamei.com.br"),
+        # domínio educacional compartilhado: não é intermediário.
+        caso(19, "EDU LTDA", email="aluno@faculdade.edu.br"),
+        # gmail.com.br tratado como provedor gratuito: o que conta é o endereço.
+        caso(20, "GMAILBR LTDA", email="joao@gmail.com.br"),
+    ]
     return casos
+
+
+def emails_da_base(antigas: list[dict]) -> None:
+    """Combina e-mails em empresas ANTIGAS da base para exercitar o
+    compartilhamento (casos 18-20). Não geram evento: já existem no mês anterior."""
+    assert len(antigas) >= 70, "base pequena demais para os casos de sinais"
+    for a in antigas[:67]:             # a Silver só guarda MG e ativas: não perder nenhuma
+        a["situacao"], a["municipio"], a["uf"] = "02", "5403", "MG"
+    for i in range(55):                # 55 + caso 18 = 56 >= limiar de 50
+        antigas[i]["email"] = f"cliente{i}@plataformamei.com.br"
+    for i in range(55, 61):            # 6 + caso 19 = 7 >= limiar de 5, mas .edu.br
+        antigas[i]["email"] = f"aluno{i}@faculdade.edu.br"
+    for i in range(61, 67):            # 6 endereços DISTINTOS no mesmo domínio
+        antigas[i]["email"] = f"pessoa{i}@gmail.com.br"
 
 
 def main() -> None:
@@ -243,6 +266,7 @@ def main() -> None:
 
     print("Gerando fixtures sintéticas (formato real da Receita)...")
     antigas = [_fabricar(i, nova=False) for i in range(1, args.base + 1)]
+    emails_da_base(antigas)
     gerar(args.anterior, antigas, hoje)
 
     # A competência atual = as antigas + um bloco de empresas realmente novas.

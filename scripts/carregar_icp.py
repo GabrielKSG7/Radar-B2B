@@ -39,7 +39,10 @@ CREATE OR REPLACE TABLE config.icp (
     pen_contador_atual      INTEGER,
     pen_fora_da_regiao      INTEGER,
     pen_grupo_empresarial   INTEGER,
-    limiar_compartilhamento INTEGER
+    limiar_compartilhamento INTEGER,
+    -- Domínio corporativo compartilhado por >= N empresas = intermediário
+    -- (plataforma/escritório), não grupo de lojas. 0 = desligado.
+    limiar_dominio_intermediario INTEGER
 );
 
 CREATE OR REPLACE TABLE config.icp_cnae (
@@ -102,7 +105,7 @@ def carregar() -> None:
         contador = sinais.get("contador_atual", {}) or {}
 
         con.execute(
-            "INSERT INTO config.icp VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO config.icp VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [nome, icp.get("descricao", "").strip(), icp.get("oferta", ""),
              icp.get("recencia_dias", 45), icp.get("score_minimo", 0),
              pesos.get("recencia", 30), pesos.get("cnae", 25),
@@ -111,7 +114,8 @@ def carregar() -> None:
              int(contador.get("penalidade", 0)),
              int((sinais.get("fora_da_regiao", {}) or {}).get("penalidade", 0)),
              int((sinais.get("grupo_empresarial", {}) or {}).get("penalidade", 0)),
-             int(contador.get("limiar_compartilhamento", 5))],
+             int(contador.get("limiar_compartilhamento", 5)),
+             int(contador.get("limiar_dominio_intermediario", 0))],
         )
 
         for ddd in icp.get("geografia", {}).get("ddd", []) or []:

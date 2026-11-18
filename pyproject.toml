@@ -1,6 +1,6 @@
 [project]
 name = "radar-b2b"
-version = "2.5.0"
+version = "2.5.1"
 description = "Motor de eventos e oportunidades B2B sobre a base pública de CNPJ"
 requires-python = ">=3.10"
 dependencies = [

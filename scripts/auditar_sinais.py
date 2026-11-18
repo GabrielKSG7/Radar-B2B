@@ -36,6 +36,8 @@ def auditar(con: duckdb.DuckDBPyConnection) -> dict:
         "contador_por_compartilhamento": um(
             "select count(*) from main_gold.gld_icp_matches "
             "where contador_por_compartilhamento"),
+        "grupo_por_dominio": um("select count(*) from main_gold.gld_icp_matches "
+                                "where grupo_por_dominio"),
         "fora_da_regiao": um("select count(*) from main_gold.gld_icp_matches "
                              "where sinal_fora_da_regiao"),
         "filial": um("select count(*) from main_gold.gld_icp_matches "
@@ -50,6 +52,12 @@ def auditar(con: duckdb.DuckDBPyConnection) -> dict:
                    count(*) as oportunidades
             from main_gold.gld_icp_matches
             where contador_por_compartilhamento
+            group by 1 order by 3 desc, 2 desc limit 15""").fetchall(),
+        "dominios_de_grupo": con.execute("""
+            select email_dominio, max(n_empresas_contato) as empresas_na_base,
+                   count(*) as oportunidades
+            from main_gold.gld_icp_matches
+            where grupo_por_dominio
             group by 1 order by 3 desc, 2 desc limit 15""").fetchall(),
     }
 
@@ -66,7 +74,8 @@ def main() -> None:
     for chave, rotulo in [
             ("contador_atual", "provável contador atual"),
             ("contador_por_padrao", "  por padrão no domínio"),
-            ("contador_por_compartilhamento", "  por e-mail compartilhado"),
+            ("contador_por_compartilhamento", "  por compartilhamento"),
+            ("grupo_por_dominio", "grupo por domínio compartilhado"),
             ("fora_da_regiao", "DDD fora da região"),
             ("filial", "filial"), ("spe", "SPE"),
             ("sem_email_valido", "sem e-mail válido"),
@@ -77,6 +86,11 @@ def main() -> None:
         print("domínios que dispararam por compartilhamento "
               "(confira se são mesmo intermediários):")
         for dom, n_base, n_op in r["dominios_compartilhados"]:
+            print(f"  {dom:<32} {n_base:>5} empresas na base · {n_op} no ICP")
+    if r["dominios_de_grupo"]:
+        print("domínios tratados como grupo empresarial "
+              "(confira se não são, na verdade, escritórios):")
+        for dom, n_base, n_op in r["dominios_de_grupo"]:
             print(f"  {dom:<32} {n_base:>5} empresas na base · {n_op} no ICP")
 
 

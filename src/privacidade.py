@@ -22,6 +22,7 @@ comercializar, revise-a com quem entende de LGPD.
 """
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 
@@ -31,6 +32,41 @@ NATUREZAS_INDIVIDUAIS = frozenset({"2135"})   # Empresário (individual)
 _IGNORAR = frozenset({"DA", "DE", "DO", "DAS", "DOS", "E", "ME", "MEI", "EPP", "EIRELI", "LTDA"})
 
 OMITIDO = "(nome omitido)"
+
+# Provedores de e-mail gratuitos: o endereço costuma ser de uma pessoa, mesmo
+# quando a empresa é uma LTDA. Mesma lista de gld_icp_matches.sql (um teste
+# confere que as duas não divergem).
+PROVEDORES_PESSOAIS = frozenset({
+    "gmail.com", "gmail.com.br", "googlemail.com", "hotmail.com",
+    "hotmail.com.br", "outlook.com", "outlook.com.br", "live.com", "msn.com",
+    "yahoo.com", "yahoo.com.br", "icloud.com", "me.com", "uol.com.br",
+    "bol.com.br", "terra.com.br", "ig.com.br", "globo.com", "globomail.com",
+    "r7.com", "zipmail.com.br", "protonmail.com", "proton.me",
+})
+
+EMAIL_PESSOAL_OMITIDO = "e-mail pessoal omitido"
+
+
+def ocultar_email_pessoal_ativo() -> bool:
+    """Ligado por padrão no piloto. RADAR_OCULTAR_EMAIL_PESSOAL=0 desliga."""
+    return os.environ.get("RADAR_OCULTAR_EMAIL_PESSOAL", "1").strip() not in (
+        "0", "false", "não", "nao")
+
+
+def email_pessoal(email: str | None) -> bool:
+    dominio = (email or "").strip().lower().rpartition("@")[2]
+    return dominio in PROVEDORES_PESSOAIS
+
+
+def explicacao_para_exibicao(row: dict) -> str | None:
+    """`score_explanation` coerente com o que o digest mostra: no empresário
+    individual o contato é omitido, então "Contato disponível" enganaria."""
+    texto = row.get("score_explanation")
+    if texto and deve_proteger(row):
+        texto = re.sub(r"Contato disponível \(\+(\d+)\)",
+                       r"Cadastro com contato (+\1; contato omitido no piloto)",
+                       texto)
+    return texto
 
 
 def eh_individual(row: dict) -> bool:
@@ -65,6 +101,10 @@ def para_exibicao(row: dict) -> dict:
     """Cópia da linha com os campos pessoais tratados; não altera a original."""
     saida = dict(row)
     if not deve_proteger(row):
+        # Empresa (LTDA etc.): e-mail de provedor gratuito é pessoal.
+        if ocultar_email_pessoal_ativo() and email_pessoal(row.get("email")):
+            saida["email"] = None
+            saida["email_pessoal_omitido"] = True
         return saida
     razao = row.get("razao_social")
     fantasia = row.get("nome_fantasia")

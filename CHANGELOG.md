@@ -6,6 +6,62 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.5.1] — 2026-11-17
+
+Second pass over the first real-data digest: fewer false "current accountant"
+flags, AI text that follows the prompt's rules, and an enrichment run that
+survives a busy provider.
+
+### Fixed
+
+- **`gmail.com.br` and `.edu.br` no longer look like intermediaries.**
+  `gmail.com.br` (a common typo) is now a free provider, so only the same
+  *address* counts; an educational domain shared by many companies is the
+  institution, not an office, and produces no sharing signal.
+- **A shared corporate domain is no longer always "current accountant".**
+  5–49 companies on one domain (a retail group, say) is now "probable business
+  group" (-20); 50 or more (a platform or an office) stays "current
+  accountant" (-30). The explanation says "domain", not "e-mail", and the
+  threshold is `sinais.contador_atual.limiar_dominio_intermediario`.
+- **Score factors print with their sign** (`ajuste_regiao -10`, not `+-10`).
+- **CSV capital uses the pt-BR decimal comma** (`20000,00`), so Excel reads it
+  as a number.
+- **Protected individuals no longer read "Contato disponível"** in the CSV
+  while the contact is hidden.
+- `src/radar_b2b.egg-info` is no longer tracked (it kept showing up as a
+  modified file after `pip install -e`); `*.egg-info/` is in `.gitignore`.
+
+### Changed
+
+- **Prompt.** The model is told the company is already open (no "opening
+  package"), not to state need or urgency as fact, not to assume a tax regime,
+  not to name contact channels, and to write in Brazilian Portuguese. It also
+  sees the pipeline's signals (current accountant, group, out-of-region
+  phone), never the e-mail or phone itself.
+- **Confidence is calibrated.** `media` is the default, `alta` only when the
+  name confirms the CNAE; current-accountant or group signals cap it at
+  `baixa`, an out-of-region phone at `media`. Before, all 15 readings said
+  `alta`.
+- **The code checks the text.** Forbidden terms (urgency, "abertura de
+  empresa", Simples Nacional, LinkedIn, ...) trigger one rewrite request; a
+  second violation falls back to the honest heuristic.
+- **Personal e-mails are hidden in the pilot digest and CSV** for companies
+  too (Gmail, Hotmail, Outlook, ... shown as "e-mail pessoal omitido"); the
+  phone and corporate e-mails stay. `RADAR_OCULTAR_EMAIL_PESSOAL=0` turns it
+  off. Same legal-review caveat as the individuals rule.
+- `auditar_sinais.py` also lists the domains treated as a business group.
+
+### Added
+
+- **Retry with backoff and a reserve model.** HTTP 429/5xx wait 5, 15 and 45 s
+  and retry; if the model is still unavailable, `RADAR_LLM_FALLBACK` (optional)
+  takes over, and the model actually used is recorded per row.
+- **Honest failure messages.** "Check the API key" only for 401/403/404, which
+  stop the run at once. Many 503s say the provider is overloaded and suggest
+  the reserve model. Readings already obtained are saved before aborting.
+- Synthetic cases for the 50-company platform domain, the `.edu.br` domain and
+  `gmail.com.br` (20 cases in `assert_sinais_fixtures`).
+
 ## [2.5.0] — 2026-11-17
 
 Score driven by what the first real-data digest showed: recency anchored on the

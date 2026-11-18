@@ -1,7 +1,0 @@
-__init__
-config
-digest
-enriquecimento
-ingestao
-observabilidade
-receita

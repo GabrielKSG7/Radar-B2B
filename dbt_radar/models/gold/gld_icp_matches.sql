@@ -65,7 +65,7 @@ padroes_contador as (
 -- para domínio corporativo é o DOMÍNIO inteiro.
 provedores_livres as (
     select unnest([
-        'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.com.br',
+        'gmail.com', 'gmail.com.br', 'googlemail.com', 'hotmail.com', 'hotmail.com.br',
         'outlook.com', 'outlook.com.br', 'live.com', 'msn.com',
         'yahoo.com', 'yahoo.com.br', 'icloud.com', 'me.com',
         'uol.com.br', 'bol.com.br', 'terra.com.br', 'ig.com.br',
@@ -107,7 +107,7 @@ avaliado as (
         i.peso_recencia, i.peso_cnae, i.peso_porte,
         i.peso_localizacao, i.peso_capital, i.peso_contexto,
         i.pen_contador_atual, i.pen_fora_da_regiao, i.pen_grupo_empresarial,
-        i.limiar_compartilhamento,
+        i.limiar_compartilhamento, i.limiar_dominio_intermediario,
 
         coalesce(c.prioridade, 'nenhum')                as cnae_prioridade,
         (e.municipio_nome in (select municipio from municipios_alvo)) as match_municipio,
@@ -177,7 +177,15 @@ contato2 as (
             and length(replace(substr(c.tel_digitos, 3),
                                substr(c.tel_digitos, 3, 1), '')) > 0
         )                                               as telefone_valido,
-        case when split_part(lower(trim(c.email)), '@', 2)
+        (split_part(lower(trim(c.email)), '@', 2)
+            in (select dominio from provedores_livres))  as contato_provedor_livre,
+        -- Domínio educacional (.edu.br) não identifica intermediário: é a
+        -- instituição, não um escritório. Sem chave = sem sinal de
+        -- compartilhamento.
+        case when split_part(lower(trim(c.email)), '@', 2) like '%.edu.br'
+                  or split_part(lower(trim(c.email)), '@', 2) = 'edu.br'
+             then null
+             when split_part(lower(trim(c.email)), '@', 2)
                   in (select dominio from provedores_livres)
              then lower(trim(c.email))
              else split_part(lower(trim(c.email)), '@', 2)
@@ -220,10 +228,24 @@ sinalizado as (
             select 1 from padroes_contador p
             where c.email_dominio like '%' || p.padrao || '%'
         ))                                              as contador_por_padrao,
+        -- Compartilhamento só vira "contador" em dois casos: (a) o MESMO
+        -- endereço de provedor gratuito em >= limiar empresas; (b) um domínio
+        -- corporativo em >= limiar_dominio_intermediario empresas (centenas de
+        -- empresas num domínio é plataforma/escritório, não grupo de lojas).
         (c.email_valido
          and c.limiar_compartilhamento > 0
          and coalesce(k.n_empresas, 0) >= c.limiar_compartilhamento
+         and (c.contato_provedor_livre
+              or (c.limiar_dominio_intermediario > 0
+                  and coalesce(k.n_empresas, 0) >= c.limiar_dominio_intermediario))
         )                                               as contador_por_compartilhamento,
+        -- Domínio corporativo compartilhado por poucas empresas: provável
+        -- grupo empresarial (a decisão contábil fica fora da empresa nova).
+        (c.email_valido
+         and c.limiar_compartilhamento > 0
+         and not c.contato_provedor_livre
+         and coalesce(k.n_empresas, 0) >= c.limiar_compartilhamento
+        )                                               as dominio_compartilhado,
 
         -- SINAL 2 — telefone válido com DDD fora da região-alvo.
         (c.telefone_valido
@@ -241,7 +263,14 @@ sinalizado as (
 )
 
 select
-    * exclude (email_norm, tel_digitos, tel_ddd, tel_local, chave_contato),
+    * exclude (email_norm, tel_digitos, tel_ddd, tel_local, chave_contato,
+               dominio_compartilhado),
     (contador_por_padrao or contador_por_compartilhamento) as sinal_contador_atual,
-    (sinal_filial or sinal_spe)                             as sinal_grupo_empresarial
+    (dominio_compartilhado
+     and not contador_por_padrao
+     and not contador_por_compartilhamento)                as grupo_por_dominio,
+    (sinal_filial or sinal_spe
+     or (dominio_compartilhado
+         and not contador_por_padrao
+         and not contador_por_compartilhamento))           as sinal_grupo_empresarial
 from sinalizado

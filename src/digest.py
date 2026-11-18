@@ -67,7 +67,24 @@ def _fmt_capital(valor) -> str:
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _fmt_pontos(v) -> str:
+    """+27 / -10 (o sinal vem do número; antes "+-10")."""
+    try:
+        return f"{int(v):+d}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _fmt_decimal_ptbr(valor) -> str:
+    """20000,00 — sem separador de milhar, para o Excel pt-BR ler como número."""
+    if valor is None:
+        return ""
+    return f"{float(valor):.2f}".replace(".", ",")
+
+
 def _bloco(row: dict) -> str:
+    original = row
+    row = privacidade.para_exibicao(row)
     nome = row.get("razao_social") or row.get("nome_fantasia") or "(razão social não disponível)"
     fantasia = row.get("nome_fantasia")
     titulo = nome if not fantasia or fantasia == nome else f"{nome} ({fantasia})"
@@ -77,6 +94,8 @@ def _bloco(row: dict) -> str:
         contato.append(f"tel. {row['telefone']}")
     if row.get("email"):
         contato.append(row["email"])
+    elif row.get("email_pessoal_omitido"):
+        contato.append(privacidade.EMAIL_PESSOAL_OMITIDO)
     contato_txt = " · ".join(contato) if contato else "sem contato no cadastro"
 
     fatores = row.get("score_fatores")
@@ -85,7 +104,8 @@ def _bloco(row: dict) -> str:
             fatores = json.loads(fatores)
         except json.JSONDecodeError:
             fatores = {}
-    fatores_txt = ", ".join(f"{k} +{v}" for k, v in (fatores or {}).items() if v)
+    fatores_txt = ", ".join(f"{k} {_fmt_pontos(v)}"
+                            for k, v in (fatores or {}).items() if v)
 
     # Procedência do enriquecimento — sempre explícita.
     if row.get("origem") == "llm":
@@ -105,7 +125,7 @@ def _bloco(row: dict) -> str:
 | **Porte** | {row.get('porte_descricao')} · capital {_fmt_capital(row.get('capital_social'))} |
 | **Contato** | {contato_txt} |
 
-**Por que apareceu:** {row.get('score_explanation')}
+**Por que apareceu:** {privacidade.explicacao_para_exibicao(original)}
 *Fatores: {fatores_txt}*
 
 **Leitura comercial** — <sub>{selo}</sub>
@@ -167,8 +187,11 @@ def _exportar_csv(linhas: list[dict], caminho) -> None:
                 x.get("razao_social"), x.get("nome_fantasia"), r["cnpj"],
                 r.get("municipio_nome"), r.get("uf"), r.get("cnae_principal"),
                 r.get("cnae_descricao"), r.get("porte_descricao"),
-                r.get("capital_social"), r["event_date"],
-                x.get("telefone"), x.get("email"), r.get("score_explanation"),
+                _fmt_decimal_ptbr(r.get("capital_social")), r["event_date"],
+                x.get("telefone"),
+                x.get("email") or (privacidade.EMAIL_PESSOAL_OMITIDO
+                                   if x.get("email_pessoal_omitido") else None),
+                privacidade.explicacao_para_exibicao(r),
                 "", "", ""])
 
 
