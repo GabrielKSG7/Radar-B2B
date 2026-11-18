@@ -27,7 +27,7 @@ import duckdb
 
 from . import observabilidade as obs
 from . import privacidade
-from .config import DB_PATH, DIGEST_DIR
+from .config import CONFIG_DIR, DB_PATH, DIGEST_DIR
 
 FAIXAS = [("Alta", 70), ("Média", 50), ("Baixa", 0)]
 
@@ -176,6 +176,31 @@ CAMPOS_CSV = [
 ]
 
 
+ARQUIVO_EXCLUSOES = CONFIG_DIR / "curadoria" / "excluir_cnpj.txt"
+
+
+def carregar_exclusoes(caminho=ARQUIVO_EXCLUSOES) -> dict[str, str]:
+    """CNPJs retirados à mão do digest (curadoria): `cnpj;motivo` por linha.
+
+    Linhas vazias e as que começam com # são ignoradas. O CNPJ pode vir com
+    pontuação. Sem arquivo, nada é excluído.
+    """
+    try:
+        texto = open(caminho, encoding="utf-8").read()
+    except FileNotFoundError:
+        return {}
+    saida: dict[str, str] = {}
+    for linha in texto.splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#"):
+            continue
+        cnpj, _, motivo = linha.partition(";")
+        digitos = "".join(c for c in cnpj if c.isdigit())
+        if len(digitos) == 14:
+            saida[digitos] = motivo.strip()
+    return saida
+
+
 def _exportar_csv(linhas: list[dict], caminho) -> None:
     """Planilha do piloto. ';' e UTF-8 com BOM: abre direto no Excel em pt-BR."""
     with open(caminho, "w", newline="", encoding="utf-8-sig") as f:
@@ -217,6 +242,14 @@ def gerar(top: int | None = None) -> tuple[str, int]:
     cur = con.execute(sql)
     cols = [d[0] for d in cur.description]
     linhas = [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+    exclusoes = carregar_exclusoes()
+    if exclusoes:
+        retiradas = [r for r in linhas if r["cnpj"] in exclusoes]
+        linhas = [r for r in linhas if r["cnpj"] not in exclusoes]
+        if retiradas:
+            print(f"[CURADORIA] {len(retiradas)} oportunidade(s) retirada(s) "
+                  f"por {ARQUIVO_EXCLUSOES.name}.")
 
     if not linhas:
         print("[AVISO] Nenhuma oportunidade para o digest.")

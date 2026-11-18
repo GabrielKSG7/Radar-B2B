@@ -1,0 +1,4 @@
+# Oportunidades retiradas à mão do digest (curadoria do piloto).
+# Uma por linha: cnpj;motivo. Linhas com # são comentário.
+# Exemplo:
+# 00000000000000;fora do perfil: móveis planejados classificado como construção

@@ -98,10 +98,18 @@ def _normalizado(texto: str | None) -> str:
     return " ".join(t for t in _tokens(texto or "") if not any(c.isdigit() for c in t))
 
 
+def telefone_valido(telefone: str | None) -> bool:
+    """10 ou 11 dígitos e não todos iguais (4444444444 é telefone de mentira)."""
+    digitos = re.sub(r"\D", "", telefone or "")
+    return len(digitos) in (10, 11) and len(set(digitos)) > 1
+
+
 def para_exibicao(row: dict) -> dict:
     """Cópia da linha com os campos pessoais tratados; não altera a original."""
     saida = dict(row)
     if not deve_proteger(row):
+        if not telefone_valido(row.get("telefone")):
+            saida["telefone"] = None
         # Sinal de contador atual: o e-mail é do ESCRITÓRIO que já atende a
         # empresa, não dela. Mostrá-lo entregaria o contato do concorrente.
         if row.get("sinal_contador_atual"):

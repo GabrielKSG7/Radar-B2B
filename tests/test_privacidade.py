@@ -258,3 +258,36 @@ def test_empresa_sem_sinal_de_contador_mantem_email_corporativo():
     row = {"natureza_juridica": "2062", "email": "contato@acme.com",
            "sinal_contador_atual": False}
     assert privacidade.para_exibicao(row)["email"] == "contato@acme.com"
+
+
+# ---- v2.5.3: curadoria manual e telefone de mentira -------------------------
+
+def test_telefone_valido():
+    assert privacidade.telefone_valido("3532215704")
+    assert privacidade.telefone_valido("35999990000")
+    assert not privacidade.telefone_valido("4444444444")
+    assert not privacidade.telefone_valido("123")
+    assert not privacidade.telefone_valido(None)
+
+
+def test_telefone_de_mentira_nao_aparece_no_digest(tmp_path, monkeypatch):
+    md, csv_txt = _gerar(tmp_path, monkeypatch, telefone="4444444444")
+    assert "4444444444" not in md and "4444444444" not in csv_txt
+
+
+def test_carregar_exclusoes_ignora_comentario_e_aceita_pontuacao(tmp_path):
+    arq = tmp_path / "excluir.txt"
+    arq.write_text("# comentário\n\n33.333.333/0001-93;fora do perfil\nlixo;x\n",
+                   encoding="utf-8")
+    assert digest.carregar_exclusoes(arq) == {"33333333000193": "fora do perfil"}
+    assert digest.carregar_exclusoes(tmp_path / "nao_existe.txt") == {}
+
+
+def test_cnpj_excluido_some_do_digest_e_da_contagem(tmp_path, monkeypatch):
+    arq = tmp_path / "excluir.txt"
+    arq.write_text("33333333000193;fora do perfil\n", encoding="utf-8")
+    monkeypatch.setattr(digest, "ARQUIVO_EXCLUSOES", arq)
+    monkeypatch.setattr(digest, "carregar_exclusoes",
+                        lambda caminho=arq: {"33333333000193": "x"})
+    md, csv_txt = _gerar(tmp_path, monkeypatch)
+    assert "BETA COMERCIO" not in md and "BETA COMERCIO" not in csv_txt
