@@ -94,6 +94,8 @@ def _bloco(row: dict) -> str:
         contato.append(f"tel. {row['telefone']}")
     if row.get("email"):
         contato.append(row["email"])
+    elif row.get("email_contador_omitido"):
+        contato.append(privacidade.EMAIL_CONTADOR_OMITIDO)
     elif row.get("email_pessoal_omitido"):
         contato.append(privacidade.EMAIL_PESSOAL_OMITIDO)
     contato_txt = " · ".join(contato) if contato else "sem contato no cadastro"
@@ -189,8 +191,11 @@ def _exportar_csv(linhas: list[dict], caminho) -> None:
                 r.get("cnae_descricao"), r.get("porte_descricao"),
                 _fmt_decimal_ptbr(r.get("capital_social")), r["event_date"],
                 x.get("telefone"),
-                x.get("email") or (privacidade.EMAIL_PESSOAL_OMITIDO
-                                   if x.get("email_pessoal_omitido") else None),
+                x.get("email") or (
+                    privacidade.EMAIL_CONTADOR_OMITIDO
+                    if x.get("email_contador_omitido")
+                    else privacidade.EMAIL_PESSOAL_OMITIDO
+                    if x.get("email_pessoal_omitido") else None),
                 privacidade.explicacao_para_exibicao(r),
                 "", "", ""])
 

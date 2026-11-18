@@ -228,3 +228,33 @@ def test_lista_de_provedores_pessoais_bate_com_a_do_dbt():
     bloco = sql[sql.index("provedores_livres as ("):]
     bloco = bloco[:bloco.index("]) as dominio")]
     assert set(re.findall(r"'([a-z0-9.\-]+)'", bloco)) == privacidade.PROVEDORES_PESSOAIS
+
+
+# ------------------------------------------------------------------- v2.5.2
+def test_email_de_provavel_contador_nao_e_mostrado(tmp_path, monkeypatch):
+    """O e-mail de uma empresa com sinal de contador atual é o do escritório
+    concorrente: nem no digest nem no CSV."""
+    caminho = _banco(tmp_path)
+    con = duckdb.connect(str(caminho))
+    con.execute("ALTER TABLE main_gold.gld_opportunities "
+                "ADD COLUMN sinal_contador_atual BOOLEAN")
+    con.execute("UPDATE main_gold.gld_opportunities SET sinal_contador_atual = false")
+    con.execute("UPDATE main_gold.gld_opportunities SET "
+                "email = 'cadastro@escritoriosigilo.com.br', "
+                "sinal_contador_atual = true WHERE event_id = 'e1'")
+    con.close()
+    monkeypatch.setattr(digest, "DB_PATH", caminho)
+    monkeypatch.setattr(digest, "DIGEST_DIR", tmp_path / "digests")
+    md = open(digest.gerar()[0], encoding="utf-8").read()
+    csv_txt = next((tmp_path / "digests").glob("radar_piloto_*.csv")).read_text(
+        encoding="utf-8-sig")
+    for texto in (md, csv_txt):
+        assert "escritoriosigilo" not in texto
+        assert "e-mail de provável contador omitido" in texto
+        assert "3511111111" in texto                    # o telefone da empresa fica
+
+
+def test_empresa_sem_sinal_de_contador_mantem_email_corporativo():
+    row = {"natureza_juridica": "2062", "email": "contato@acme.com",
+           "sinal_contador_atual": False}
+    assert privacidade.para_exibicao(row)["email"] == "contato@acme.com"

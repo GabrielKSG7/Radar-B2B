@@ -6,6 +6,26 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ---
 
+## [2.5.2] — 2026-11-17
+
+Terceira passada no digest real: ele ainda mostrava duas coisas que um
+escritório do piloto não deve ver.
+
+### Corrigido
+
+- **Texto da IA sem acentos.** 7 de 15 leituras do digest da 2.5.1 vieram
+  desacentuadas ("Operacao ... servicos de alimentacao"). O prompt agora exige
+  acentuação correta, e o código rejeita leituras com palavras que em português
+  sempre levam acento ou cedilha (`servicos`, `operacao`, `conciliacao`, ...):
+  um pedido de reescrita, depois a heurística honesta. Conferido contra as 15
+  leituras reais: marca exatamente essas 7 e nenhuma das 8 boas. Razão social em
+  maiúsculas (`COMERCIO RDM`) não conta.
+- **O digest mostrava o e-mail do concorrente.** Em empresa marcada como
+  "provável contador atual", o e-mail do cadastro é o do escritório de
+  contabilidade, não o da empresa. Agora ele fica oculto ("e-mail de provável
+  contador omitido") no digest e no CSV; o telefone permanece.
+- "CNAE primário/secundário" na explicação do score (estava `primario`).
+
 ## [2.5.1] — 2026-11-17
 
 Segunda passada no primeiro digest com dado real: menos falsos "contador

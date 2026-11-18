@@ -64,6 +64,12 @@ where (caso = 11 and json_extract(score_fatores, '$.contexto')::int
                          from fixtures where caso = 1))
 
 union all
+-- Texto do digest com acento: "CNAE primário", não "primario".
+select caso, 'explicação do score sem acento em "primário"'
+from fixtures
+where score_explanation like '%CNAE primario%'
+
+union all
 select 0, 'casos de sinais faltando no Gold'
 where exists (select 1 from {{ ref('evt_new_company') }}
               where razao_social like '%FIXTURE SINTETICO%')

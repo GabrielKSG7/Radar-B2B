@@ -146,7 +146,10 @@ select
     -- Texto derivado dos fatores (nunca escrito à mão em outro lugar).
     concat_ws(' · ',
         'Aberta há ' || dias_desde_evento || ' dias (+' || pts_recencia || ')',
-        'CNAE ' || cnae_prioridade || ' (+' || pts_cnae || ')',
+        'CNAE ' || case cnae_prioridade when 'primario' then 'primário'
+                                        when 'secundario' then 'secundário'
+                                        else cnae_prioridade end
+               || ' (+' || pts_cnae || ')',
         case when pts_porte > 0 then porte_descricao || ' (+' || pts_porte || ')' end,
         case when pts_localizacao > 0 then municipio_nome || ' (+' || pts_localizacao || ')' end,
         case when pts_capital > 0 then 'Capital social (+' || pts_capital || ')' end,

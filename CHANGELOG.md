@@ -6,6 +6,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.5.2] — 2026-11-17
+
+Third pass on the real digest: it still showed two things a pilot office should
+not see.
+
+### Fixed
+
+- **AI text without accents.** 7 of 15 readings in the 2.5.1 digest came back
+  stripped ("Operacao ... servicos de alimentacao"). The prompt now requires
+  correct accents, and the code rejects any reading containing words that always
+  carry an accent or cedilla in Portuguese (`servicos`, `operacao`,
+  `conciliacao`, ...): one rewrite request, then the honest heuristic. Checked
+  against the 15 real readings: it flags exactly those 7 and none of the 8 good
+  ones. Company names in capitals (`COMERCIO RDM`) do not count.
+- **The digest showed the competitor's e-mail.** For a company flagged as
+  "probable current accountant", the e-mail on file is the accounting office's,
+  not the company's. It is now hidden ("e-mail de provável contador omitido") in
+  the digest and the CSV; the phone stays.
+- "CNAE primário/secundário" in the score explanation (was `primario`).
+
 ## [2.5.1] — 2026-11-17
 
 Second pass over the first real-data digest: fewer false "current accountant"

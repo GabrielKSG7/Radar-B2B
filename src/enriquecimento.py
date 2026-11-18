@@ -109,7 +109,9 @@ REGRAS INEGOCIÁVEIS:
   qualquer regime como se fosse a situação da empresa.
 - Não cite canais de contato (telefone, e-mail, LinkedIn, WhatsApp, visita).
   O canal é escolha de quem usa o digest. Diga apenas "contato consultivo".
-- Escreva em português do Brasil, sem palavras em outros idiomas.
+- Escreva em português do Brasil, com acentuação e cedilha corretas (ção, ã,
+  é, ê, í, ó, ç). Nunca troque "ç" por "c" nem remova acentos. Não invente
+  palavras.
 - A explicação de relevância deve conectar o evento à oferta do ICP.
 
 CONFIANÇA (da leitura comercial, não da detecção do evento):
@@ -132,6 +134,20 @@ PROIBIDOS = re.compile(
 # público_alvo, "empresas que necessitam de transporte" descreve os clientes.
 PROIBIDOS_SOBRE_A_EMPRESA = re.compile(
     r"\bnecessit\w*|\bprecisa(m)?\b|perfeitamente", re.IGNORECASE)
+# Palavras que, em português correto, SEMPRE levam acento ou cedilha. Se
+# aparecerem sem, o modelo desacentuou o texto (o modelo leve faz isso quando
+# imita o CNAE/município em caixa alta). Só minúsculas e Capitalizadas: a razão
+# social em maiúsculas ("COMERCIO RDM") é nome próprio e não conta.
+_SEM_ACENTO = (
+    "servico servicos operacao operacoes organizacao constituicao obrigacao "
+    "obrigacoes gestao inicio regiao apuracao conciliacao emissao estruturacao "
+    "criacao medicoes especifico especificos especifica especificas fisica "
+    "diario comercio alimentacao construcao edificios imoveis proprietarios "
+    "industrias contabil contabeis coracoes recem acessorios vestuario "
+    "logistica distribuicao prestacao negocio negocios").split()
+ACENTO_PERDIDO = re.compile(
+    r"\b(" + "|".join(sorted({w for p in _SEM_ACENTO for w in (p, p.capitalize())},
+                             key=len, reverse=True)) + r")\b")
 CAMPOS_TEXTO = ("atividade_provavel", "publico_alvo", "hipotese_de_dor",
                 "explicacao_relevancia", "acao_sugerida")
 CAMPOS_SOBRE_A_EMPRESA = ("explicacao_relevancia", "acao_sugerida")
@@ -147,6 +163,10 @@ def violacoes(ctx: dict) -> list[str]:
         if campo in CAMPOS_SOBRE_A_EMPRESA:
             for m in PROIBIDOS_SOBRE_A_EMPRESA.finditer(texto):
                 achados.append(f"{campo}: '{m.group(0)}'")
+    todo = " ".join(ctx.get(c) or "" for c in CAMPOS_TEXTO)
+    sem_acento = sorted({m.group(0).lower() for m in ACENTO_PERDIDO.finditer(todo)})
+    if sem_acento:
+        achados.append("texto sem acentuação: " + ", ".join(sem_acento[:5]))
     return achados
 
 

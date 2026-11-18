@@ -45,6 +45,7 @@ PROVEDORES_PESSOAIS = frozenset({
 })
 
 EMAIL_PESSOAL_OMITIDO = "e-mail pessoal omitido"
+EMAIL_CONTADOR_OMITIDO = "e-mail de provável contador omitido"
 
 
 def ocultar_email_pessoal_ativo() -> bool:
@@ -101,6 +102,12 @@ def para_exibicao(row: dict) -> dict:
     """Cópia da linha com os campos pessoais tratados; não altera a original."""
     saida = dict(row)
     if not deve_proteger(row):
+        # Sinal de contador atual: o e-mail é do ESCRITÓRIO que já atende a
+        # empresa, não dela. Mostrá-lo entregaria o contato do concorrente.
+        if row.get("sinal_contador_atual"):
+            saida["email"] = None
+            saida["email_contador_omitido"] = True
+            return saida
         # Empresa (LTDA etc.): e-mail de provedor gratuito é pessoal.
         if ocultar_email_pessoal_ativo() and email_pessoal(row.get("email")):
             saida["email"] = None

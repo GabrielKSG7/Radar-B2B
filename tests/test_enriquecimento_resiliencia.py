@@ -243,3 +243,36 @@ def test_enriquecer_registra_o_modelo_reserva_usado(tmp_path, monkeypatch):
     assert con.execute(f"SELECT modelo, origem FROM {enr.TABELA}").fetchall() \
         == [("reserva", "llm")]
     con.close()
+
+
+# ------------------------------------------------------------------- v2.5.2
+def test_texto_desacentuado_e_detectado():
+    achados = enr.violacoes({
+        "atividade_provavel": "Operacao de restaurante e servicos de alimentacao",
+        "acao_sugerida": "Contato consultivo."})
+    assert achados and "sem acentuação" in achados[0]
+    assert "operacao" in achados[0] and "servicos" in achados[0]
+
+
+def test_texto_acentuado_passa():
+    assert enr.violacoes({
+        "atividade_provavel": "Operação de restaurante e serviços de alimentação",
+        "hipotese_de_dor": "Costumam ter dificuldade na conciliação de pagamentos.",
+        "publico_alvo": "Consumidores finais em Três Corações."}) == []
+
+
+def test_razao_social_em_maiusculas_nao_conta_como_desacentuada():
+    assert enr.violacoes({"atividade_provavel":
+                          "Atua como COMERCIO RDM VARGINHA LTDA no varejo."}) == []
+
+
+def test_texto_desacentuado_pede_reescrita_e_aceita_a_corrigida():
+    ruim = _resp(atividade_provavel="Operacao de restaurante e servicos de alimentacao")
+    cli = ClienteFalso([ruim, _resp()])
+    ctx, _ = enr.chamar_com_resiliencia(cli, ROW, dormir=lambda s: None)
+    assert len(cli.modelos) == 2 and "sem acentuação" in cli.prompts[1]
+    assert ctx["atividade_provavel"] == "Restaurante."
+
+
+def test_system_exige_acentuacao():
+    assert "acentuação" in enr.SYSTEM
